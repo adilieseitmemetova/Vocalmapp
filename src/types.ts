@@ -8,7 +8,13 @@ export type MarkerIconName =
   | "breath"
   | "accent"
   | "soft"
-  | "strong";
+  | "strong"
+  | "pause"
+  | "cut"
+  | "repeat"
+  | "spark"
+  | "volume"
+  | "mute";
 
 export type Marker = {
   id: string;

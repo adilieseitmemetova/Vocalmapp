@@ -9,6 +9,7 @@ import {
   Play,
   Plus,
   Search,
+  Sparkles,
   Square,
   Trash2,
   Upload,
@@ -23,13 +24,15 @@ import {
   searchLyricsCatalog,
   syncedLyricsToPlainText
 } from "./lyrics";
-import { MARKERS, markerById, markerIcons } from "./markers";
-import { deleteAudioBlob, getAudioBlob, loadSongs, putAudioBlob, saveSongs } from "./storage";
+import { DEFAULT_MARKERS, MARKER_ICON_OPTIONS, markerIcons } from "./markers";
+import { deleteAudioBlob, getAudioBlob, loadCustomMarkers, loadSongs, putAudioBlob, saveCustomMarkers, saveSongs } from "./storage";
 import type {
   AudioReference,
   LineAnnotation,
   LyricLine,
   LyricWord,
+  Marker,
+  MarkerIconName,
   SelectedTarget,
   Song,
   SongDraft,
@@ -41,6 +44,13 @@ const EMPTY_DRAFT: SongDraft = {
   title: "",
   artist: "",
   lyricsText: ""
+};
+
+const EMPTY_CUSTOM_MARKER: { label: string; meaning: string; color: string; icon: MarkerIconName } = {
+  label: "",
+  meaning: "",
+  color: "#7a48aa",
+  icon: "spark"
 };
 
 function createId(prefix: string) {
@@ -175,7 +185,7 @@ function findSelectedData(song: Song | undefined, selection: SelectedTarget | nu
   };
 }
 
-function MarkerBadge({ markerId }: { markerId: string }) {
+function MarkerBadge({ markerId, markerById }: { markerId: string; markerById: Map<string, Marker> }) {
   const marker = markerById.get(markerId);
   if (!marker) {
     return null;
@@ -248,12 +258,14 @@ function LyricsLine({
   line,
   songId,
   onSelect,
-  onPlayAudio
+  onPlayAudio,
+  markerById
 }: {
   line: LyricLine;
   songId: string;
   onSelect: (target: SelectedTarget) => void;
   onPlayAudio: (audioReference: AudioReference) => void;
+  markerById: Map<string, Marker>;
 }) {
   function selectLine(event: React.MouseEvent) {
     onSelect({
@@ -282,7 +294,7 @@ function LyricsLine({
       <div className="line-gutter">
         <div className="line-assets">
           {line.annotations.map((annotation) => (
-            <MarkerBadge key={annotation.id} markerId={annotation.markerId} />
+            <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
           ))}
           {line.audioReference ? <AudioDot onPlay={() => onPlayAudio(line.audioReference!)} title="Аудио строки" /> : null}
         </div>
@@ -295,7 +307,7 @@ function LyricsLine({
             <span className="word-wrap" key={word.id}>
               <span className="word-assets">
                 {word.annotations.map((annotation) => (
-                  <MarkerBadge key={annotation.id} markerId={annotation.markerId} />
+                  <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
                 ))}
                 {word.audioReference ? <AudioDot onPlay={() => onPlayAudio(word.audioReference!)} title="Аудио слова" /> : null}
               </span>
@@ -345,6 +357,8 @@ function SongAudioUploader({
 
 export default function App() {
   const [songs, setSongs] = useState<Song[]>(() => loadSongs());
+  const [customMarkers, setCustomMarkers] = useState<Marker[]>(() => loadCustomMarkers());
+  const [customMarkerDraft, setCustomMarkerDraft] = useState(EMPTY_CUSTOM_MARKER);
   const [activeSongId, setActiveSongId] = useState<string | null>(null);
   const [localSearch, setLocalSearch] = useState("");
   const [draft, setDraft] = useState<SongDraft>(EMPTY_DRAFT);
@@ -368,6 +382,10 @@ export default function App() {
   }, [songs]);
 
   useEffect(() => {
+    saveCustomMarkers(customMarkers);
+  }, [customMarkers]);
+
+  useEffect(() => {
     if (!activeSongId && songs.length > 0) {
       setActiveSongId(songs[0].id);
     }
@@ -385,6 +403,17 @@ export default function App() {
   }, []);
 
   const activeSong = useMemo(() => songs.find((song) => song.id === activeSongId), [activeSongId, songs]);
+  const markers = useMemo(() => {
+    const usedIds = new Set<string>();
+    return [...DEFAULT_MARKERS, ...customMarkers].filter((marker) => {
+      if (usedIds.has(marker.id)) {
+        return false;
+      }
+      usedIds.add(marker.id);
+      return true;
+    });
+  }, [customMarkers]);
+  const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
   const selectedData = useMemo(() => findSelectedData(activeSong, selection), [activeSong, selection]);
   const currentTargetKey = selectedTargetKey(selection);
 
@@ -436,6 +465,60 @@ export default function App() {
     setSongs((currentSongs) => currentSongs.filter((item) => item.id !== song.id));
     setActiveSongId((currentId) => (currentId === song.id ? null : currentId));
     setSelection(null);
+  }
+
+  function addCustomMarker(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const label = customMarkerDraft.label.trim();
+    const meaning = customMarkerDraft.meaning.trim();
+
+    if (!label) {
+      setStatusMessage("Добавьте короткое название знака.");
+      return;
+    }
+
+    const now = crypto.randomUUID();
+    setCustomMarkers((currentMarkers) => [
+      ...currentMarkers,
+      {
+        id: `custom-${now}`,
+        label: label.slice(0, 14),
+        meaning: meaning || "Пользовательский вокальный знак",
+        color: customMarkerDraft.color,
+        icon: customMarkerDraft.icon
+      }
+    ]);
+    setCustomMarkerDraft({ ...EMPTY_CUSTOM_MARKER, color: customMarkerDraft.color });
+    setStatusMessage("Знак добавлен.");
+  }
+
+  function removeCustomMarker(markerId: string) {
+    const marker = customMarkers.find((item) => item.id === markerId);
+    if (!marker) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Удалить знак "${marker.label}" и убрать его из песен?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setCustomMarkers((currentMarkers) => currentMarkers.filter((item) => item.id !== markerId));
+    setSongs((currentSongs) =>
+      currentSongs.map((song) => ({
+        ...song,
+        lyrics: song.lyrics.map((line) => ({
+          ...line,
+          annotations: line.annotations.filter((annotation) => annotation.markerId !== markerId),
+          words: line.words.map((word) => ({
+            ...word,
+            annotations: word.annotations.filter((annotation) => annotation.markerId !== markerId)
+          }))
+        })),
+        updatedAt: new Date().toISOString()
+      }))
+    );
+    setStatusMessage("Знак удален.");
   }
 
   async function searchSpotify() {
@@ -817,6 +900,74 @@ export default function App() {
           </div>
         </section>
 
+        <section className="sidebar-section marker-manager">
+          <div className="section-title">
+            <Sparkles size={14} />
+            Вокальные знаки
+          </div>
+          <div className="marker-preview-list">
+            {markers.map((marker) => {
+              const Icon = markerIcons[marker.icon];
+              const isCustom = marker.id.startsWith("custom-");
+
+              return (
+                <span
+                  className={`marker-preview-pill ${isCustom ? "custom" : ""}`}
+                  key={marker.id}
+                  style={{ "--marker-color": marker.color } as React.CSSProperties}
+                  title={marker.meaning}
+                >
+                  <Icon size={11} strokeWidth={2.4} />
+                  <span>{marker.label}</span>
+                  {isCustom ? (
+                    <button type="button" onClick={() => removeCustomMarker(marker.id)} title="Удалить знак">
+                      <X size={10} />
+                    </button>
+                  ) : null}
+                </span>
+              );
+            })}
+          </div>
+          <form className="custom-marker-form" onSubmit={addCustomMarker}>
+            <input
+              value={customMarkerDraft.label}
+              onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, label: event.target.value }))}
+              placeholder="Новый знак"
+              maxLength={14}
+            />
+            <input
+              value={customMarkerDraft.meaning}
+              onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, meaning: event.target.value }))}
+              placeholder="Что значит"
+            />
+            <div className="custom-marker-row">
+              <input
+                className="color-input"
+                type="color"
+                value={customMarkerDraft.color}
+                onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, color: event.target.value }))}
+                title="Цвет знака"
+              />
+              <select
+                value={customMarkerDraft.icon}
+                onChange={(event) =>
+                  setCustomMarkerDraft((current) => ({ ...current, icon: event.target.value as MarkerIconName }))
+                }
+              >
+                {MARKER_ICON_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button className="secondary-button" type="submit">
+                <Plus size={14} />
+                Add
+              </button>
+            </div>
+          </form>
+        </section>
+
         <section className="sidebar-section grow">
           <div className="section-title">
             <Library size={14} />
@@ -957,6 +1108,7 @@ export default function App() {
                     songId={activeSong.id}
                     onSelect={setSelection}
                     onPlayAudio={(audioReference) => void playAudioReference(audioReference)}
+                    markerById={markerById}
                   />
                 ))
               )}
@@ -990,7 +1142,7 @@ export default function App() {
           </div>
 
           <div className="marker-grid">
-            {MARKERS.map((marker) => {
+            {markers.map((marker) => {
               const Icon = markerIcons[marker.icon];
               const active = selectedData.annotations.some((annotation) => annotation.markerId === marker.id);
 

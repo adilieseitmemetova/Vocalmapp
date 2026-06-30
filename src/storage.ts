@@ -1,6 +1,7 @@
-import type { Song } from "./types";
+import type { Marker, Song } from "./types";
 
 const SONGS_STORAGE_KEY = "vocal-song-markup:songs:v1";
+const CUSTOM_MARKERS_STORAGE_KEY = "vocal-song-markup:custom-markers:v1";
 const AUDIO_DB_NAME = "vocal-song-markup-audio";
 const AUDIO_STORE_NAME = "audio-blobs";
 
@@ -18,6 +19,22 @@ export function loadSongs() {
 
 export function saveSongs(songs: Song[]) {
   localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(songs));
+}
+
+export function loadCustomMarkers() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_MARKERS_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    return JSON.parse(raw) as Marker[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomMarkers(markers: Marker[]) {
+  localStorage.setItem(CUSTOM_MARKERS_STORAGE_KEY, JSON.stringify(markers));
 }
 
 function openAudioDb(): Promise<IDBDatabase> {
@@ -65,4 +82,3 @@ export async function deleteAudioBlob(storageKey: string) {
     tx.onerror = () => reject(tx.error);
   }).finally(() => db.close());
 }
-

@@ -851,7 +851,7 @@ export default function App() {
             <Music2 size={18} />
           </div>
           <div>
-            <p className="brand-title">Vocal Markup</p>
+            <p className="brand-title">VocalMap</p>
             <p className="brand-subtitle">песни, слова, знаки</p>
           </div>
         </div>

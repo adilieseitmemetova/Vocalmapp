@@ -1,52 +1,78 @@
-# VocalMap
+# vocalmapp
 
-Личный инструмент для вокальной разметки песен.
+vocalmapp is a private Next.js App Router application for vocalists who mark up lyrics with vocal cues and short reference recordings.
 
-## Что Уже Работает
+## Stack
 
-- Список песен.
-- Добавление песни вручную.
-- Поиск современной музыки:
-  - Spotify, если добавлены credentials.
-  - LRCLIB fallback без credentials, если Spotify не подключен.
-- Попытка подтянуть текст песни через LRCLIB.
-- Ручная вставка и редактирование текста.
-- Кликабельные строки.
-- Кликабельные слова.
-- Разные hover-состояния для строки и слова.
-- Цветные вокальные знаки.
-- Несколько знаков на одно слово или строку.
-- Запись аудио-референса для строки или слова.
-- Локальное хранение песен и разметки.
-- IndexedDB хранение аудио.
+- Next.js App Router
+- React Server Components for protected page bootstrapping
+- Client components for the interactive lyric editor, recording, and uploads
+- Tailwind CSS v4
+- next-intl with English as the default locale
+- Supabase Auth, Database, Row Level Security, and Storage
+- Supabase email one-time code authentication
 
-## Запуск
+## Environment
+
+Create `.env.local` from `.env.example` and set:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+```
+
+`SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are optional. When they are missing, the search UI falls back to LRCLIB results.
+
+Do not expose `SUPABASE_SERVICE_ROLE_KEY` to client code. The application uses the public Supabase anon key with RLS for browser access.
+
+## Supabase Setup
+
+The live schema was created with Supabase MCP for project `gzbqhahmqespmimdojzr`.
+
+Created public tables:
+
+- `profiles`
+- `songs`
+- `lyric_lines`
+- `lyric_words`
+- `markers`
+- `annotations`
+- `audio_references`
+
+Created storage bucket:
+
+- `vocalmap-audio`
+
+Every application table has Row Level Security enabled. Policies restrict users to their own rows, except system markers, which authenticated users can read. Storage policies restrict audio objects to authenticated owners inside their own user folder.
+
+For email code auth, configure the Supabase Auth email template to include the one-time token:
+
+```text
+{{ .Token }}
+```
+
+If the template uses `{{ .ConfirmationURL }}`, Supabase sends an email link instead of the code expected by this UI.
+
+## Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Открыть:
+Open:
 
 ```text
-http://127.0.0.1:5173/
+http://127.0.0.1:3000
 ```
 
-## Spotify
-
-Spotify не обязателен для первого запуска: без credentials приложение будет искать через LRCLIB.
-
-Чтобы подключить Spotify search:
-
-1. Создать `.env` из `.env.example`.
-2. Заполнить:
+## Verification
 
 ```bash
-SPOTIFY_CLIENT_ID=...
-SPOTIFY_CLIENT_SECRET=...
+npm run typecheck
+npm run lint
+npm run build
+npm audit
 ```
-
-3. Перезапустить `npm run dev`.
-
-Spotify используется только для поиска треков и метаданных. Тексты подтягиваются через LRCLIB или вставляются вручную.

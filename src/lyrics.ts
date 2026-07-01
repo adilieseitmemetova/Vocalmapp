@@ -1,7 +1,7 @@
 import type { LyricLine, LyricsMatch } from "./types";
 
-function makeId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`;
+function makeId() {
+  return crypto.randomUUID();
 }
 
 function splitWords(line: string) {
@@ -17,7 +17,7 @@ export function buildLyrics(text: string, existingLines: LyricLine[] = []) {
       const previousWordMatches = previousLineMatches && previousWord?.text === wordText;
 
       return {
-        id: previousWordMatches ? previousWord.id : makeId("word"),
+        id: previousWordMatches ? previousWord.id : makeId(),
         text: wordText,
         annotations: previousWordMatches ? previousWord.annotations : [],
         audioReference: previousWordMatches ? previousWord.audioReference : undefined
@@ -25,7 +25,7 @@ export function buildLyrics(text: string, existingLines: LyricLine[] = []) {
     });
 
     return {
-      id: previousLineMatches ? previousLine.id : makeId("line"),
+      id: previousLineMatches ? previousLine.id : makeId(),
       text: lineText,
       words,
       annotations: previousLineMatches ? previousLine.annotations : [],
@@ -109,7 +109,7 @@ async function fetchLrcLibSearch(params: URLSearchParams) {
       return (await response.json()) as LyricsMatch[];
     }
   } catch {
-    // Static previews do not have the Vite dev API. Fall back to LRCLIB directly.
+    // Static previews do not have local route handlers. Fall back to LRCLIB directly.
   }
 
   const response = await fetch(remoteUrl);

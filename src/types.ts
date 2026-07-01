@@ -22,13 +22,15 @@ export type Marker = {
   meaning: string;
   color: string;
   icon: MarkerIconName;
+  isSystem?: boolean;
 };
 
 export type AudioReference = {
   id: string;
-  storageKey: string;
+  storagePath: string;
   mimeType: string;
   durationMs?: number;
+  sizeBytes?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -74,6 +76,11 @@ export type Song = {
   durationMs?: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type InitialVocalMapData = {
+  songs: Song[];
+  markers: Marker[];
 };
 
 export type SpotifyTrackResult = {

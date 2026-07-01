@@ -21,149 +21,170 @@ export const DEFAULT_MARKERS: Marker[] = [
   {
     id: "up",
     label: "Up",
-    meaning: "Идет на повышение",
+    meaning: "Pitch rises",
     color: "#1aae39",
-    icon: "up"
+    icon: "up",
+    isSystem: true
   },
   {
     id: "down",
     label: "Down",
-    meaning: "Идет на понижение",
+    meaning: "Pitch falls",
     color: "#0075de",
-    icon: "down"
+    icon: "down",
+    isSystem: true
   },
   {
     id: "vib",
     label: "Vib",
-    meaning: "Вибрато",
+    meaning: "Vibrato",
     color: "#8f4fd7",
-    icon: "wave"
+    icon: "wave",
+    isSystem: true
   },
   {
     id: "hold",
     label: "Hold",
-    meaning: "Тянуть звук",
+    meaning: "Sustain the sound",
     color: "#c69214",
-    icon: "line"
+    icon: "line",
+    isSystem: true
   },
   {
     id: "breath",
     label: "Breath",
-    meaning: "Взять дыхание",
+    meaning: "Take a breath",
     color: "#2a9d99",
-    icon: "breath"
+    icon: "breath",
+    isSystem: true
   },
   {
     id: "accent",
     label: "Accent",
-    meaning: "Акцент",
+    meaning: "Emphasize this sound",
     color: "#dc2f2f",
-    icon: "accent"
+    icon: "accent",
+    isSystem: true
   },
   {
     id: "soft",
     label: "Soft",
-    meaning: "Мягко",
+    meaning: "Sing gently",
     color: "#ff64c8",
-    icon: "soft"
+    icon: "soft",
+    isSystem: true
   },
   {
     id: "strong",
     label: "Strong",
-    meaning: "Сильнее",
+    meaning: "Add strength",
     color: "#dd5b00",
-    icon: "strong"
+    icon: "strong",
+    isSystem: true
   },
   {
     id: "slide-up",
-    label: "Slide ↑",
-    meaning: "Скольжение вверх",
+    label: "Slide up",
+    meaning: "Slide upward",
     color: "#178a2f",
-    icon: "up"
+    icon: "up",
+    isSystem: true
   },
   {
     id: "slide-down",
-    label: "Slide ↓",
-    meaning: "Скольжение вниз",
+    label: "Slide down",
+    meaning: "Slide downward",
     color: "#1d6fbd",
-    icon: "down"
+    icon: "down",
+    isSystem: true
   },
   {
     id: "legato",
     label: "Legato",
-    meaning: "Соединить мягко, без разрыва",
+    meaning: "Connect smoothly without a break",
     color: "#6b58c8",
-    icon: "wave"
+    icon: "wave",
+    isSystem: true
   },
   {
     id: "pause",
     label: "Pause",
-    meaning: "Пауза или не спешить",
+    meaning: "Pause or slow down",
     color: "#615d59",
-    icon: "pause"
+    icon: "pause",
+    isSystem: true
   },
   {
     id: "cut",
     label: "Cut",
-    meaning: "Коротко снять звук",
+    meaning: "Release the sound quickly",
     color: "#9b2f2f",
-    icon: "cut"
+    icon: "cut",
+    isSystem: true
   },
   {
     id: "run",
     label: "Run",
-    meaning: "Мелизм или вокальный пробег",
+    meaning: "Melisma or vocal run",
     color: "#007a7a",
-    icon: "repeat"
+    icon: "repeat",
+    isSystem: true
   },
   {
     id: "mix",
     label: "Mix",
-    meaning: "Микст",
+    meaning: "Mixed voice",
     color: "#7a48aa",
-    icon: "spark"
+    icon: "spark",
+    isSystem: true
   },
   {
     id: "head",
     label: "Head",
-    meaning: "Головной голос",
+    meaning: "Head voice",
     color: "#4a85d8",
-    icon: "volume"
+    icon: "volume",
+    isSystem: true
   },
   {
     id: "chest",
     label: "Chest",
-    meaning: "Грудной голос",
+    meaning: "Chest voice",
     color: "#8a4b24",
-    icon: "strong"
+    icon: "strong",
+    isSystem: true
   },
   {
     id: "falsetto",
     label: "Falsetto",
-    meaning: "Фальцет",
+    meaning: "Falsetto",
     color: "#c45aa0",
-    icon: "soft"
+    icon: "soft",
+    isSystem: true
   },
   {
     id: "twang",
     label: "Twang",
-    meaning: "Яркий twang-оттенок",
+    meaning: "Bright twang tone",
     color: "#b76a00",
-    icon: "spark"
+    icon: "spark",
+    isSystem: true
   },
   {
     id: "cry",
     label: "Cry",
-    meaning: "Плачущий оттенок",
+    meaning: "Crying tone",
     color: "#5b70c8",
-    icon: "wave"
+    icon: "wave",
+    isSystem: true
   },
   {
     id: "mute",
     label: "Mute",
-    meaning: "Тише или убрать лишний звук",
+    meaning: "Sing quieter or remove extra sound",
     color: "#6d6a65",
-    icon: "mute"
+    icon: "mute",
+    isSystem: true
   }
 ];
 
@@ -184,19 +205,19 @@ export const markerIcons: Record<MarkerIconName, ComponentType<{ size?: number; 
   mute: VolumeX
 };
 
-export const MARKER_ICON_OPTIONS: Array<{ value: MarkerIconName; label: string }> = [
-  { value: "up", label: "Up" },
-  { value: "down", label: "Down" },
-  { value: "wave", label: "Wave" },
-  { value: "line", label: "Line" },
-  { value: "breath", label: "Breath" },
-  { value: "accent", label: "Dot" },
-  { value: "soft", label: "Circle" },
-  { value: "strong", label: "Strong" },
-  { value: "pause", label: "Pause" },
-  { value: "cut", label: "Cut" },
-  { value: "repeat", label: "Run" },
-  { value: "spark", label: "Spark" },
-  { value: "volume", label: "Voice" },
-  { value: "mute", label: "Mute" }
+export const MARKER_ICON_OPTIONS: Array<{ value: MarkerIconName }> = [
+  { value: "up" },
+  { value: "down" },
+  { value: "wave" },
+  { value: "line" },
+  { value: "breath" },
+  { value: "accent" },
+  { value: "soft" },
+  { value: "strong" },
+  { value: "pause" },
+  { value: "cut" },
+  { value: "repeat" },
+  { value: "spark" },
+  { value: "volume" },
+  { value: "mute" }
 ];

@@ -9,8 +9,9 @@ import { useMemo, useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const codePattern = /^\d{6,10}$/;
-const maxCodeLength = 10;
+const codeBoxCount = 6;
+const codePattern = /^\d{6}$/;
+const maxCodeLength = codeBoxCount;
 
 type AuthStep = "email" | "code";
 type AuthStatus = "idle" | "sending" | "sent" | "verifying" | "redirecting" | "error";
@@ -74,6 +75,7 @@ export function EmailCodeForm() {
   const [email, setEmail] = useState("");
   const [confirmedEmail, setConfirmedEmail] = useState("");
   const [code, setCode] = useState("");
+  const [isCodeFocused, setIsCodeFocused] = useState(false);
   const [status, setStatus] = useState<AuthStatus>("idle");
   const [message, setMessage] = useState("");
 
@@ -237,19 +239,39 @@ export function EmailCodeForm() {
         <form className="grid gap-4 text-center" onSubmit={handleCodeSubmit}>
           <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="otp-code">
             <span className="sr-only">{t("codeLabel")}</span>
-            <input
-              className="h-11 rounded-md border border-stone-200 bg-white px-4 text-center text-base font-semibold text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-              id="otp-code"
-              name="otp-code"
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(event) => handleCodeChange(event.target.value)}
-              placeholder={t("codePlaceholder")}
-              aria-describedby="otp-code-help"
-              required
-            />
+            <div className="relative">
+              <div className="mx-auto grid w-full max-w-[20rem] grid-cols-6 gap-2" aria-hidden="true">
+                {Array.from({ length: codeBoxCount }, (_, index) => {
+                  const isActive = isCodeFocused && index === Math.min(code.length, codeBoxCount - 1);
+
+                  return (
+                    <span
+                      className={`grid aspect-square min-h-0 place-items-center rounded-md border bg-white text-lg font-semibold text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] transition ${
+                        isActive ? "border-emerald-500 ring-4 ring-emerald-100" : "border-stone-200"
+                      }`}
+                      key={index}
+                    >
+                      {code[index] ?? ""}
+                    </span>
+                  );
+                })}
+              </div>
+              <input
+                className="absolute inset-0 h-full w-full cursor-text opacity-0"
+                id="otp-code"
+                name="otp-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(event) => handleCodeChange(event.target.value)}
+                onFocus={() => setIsCodeFocused(true)}
+                onBlur={() => setIsCodeFocused(false)}
+                placeholder={t("codePlaceholder")}
+                aria-describedby="otp-code-help"
+                required
+              />
+            </div>
             <span className="text-xs font-medium leading-5 text-stone-500" id="otp-code-help">
               {t("codeHelp", { email: confirmedEmail })}
             </span>

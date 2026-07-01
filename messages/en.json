@@ -43,7 +43,7 @@
     "codeSentTitle": "Check your inbox",
     "codeSentBody": "We sent a sign-in code to {email}. Keep this tab open and enter the newest code below.",
     "codeLabel": "Verification code",
-    "codePlaceholder": "00000000",
+    "codePlaceholder": "000000",
     "codeHelp": "Enter the newest code sent to {email}. Requesting another code cancels the previous one.",
     "codeVerify": "Verify code",
     "codeVerifying": "Verifying code",

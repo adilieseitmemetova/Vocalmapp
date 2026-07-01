@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Loader2, Mail, RefreshCw } from "lucide-react";
+import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
@@ -12,7 +13,7 @@ const codePattern = /^\d{6,10}$/;
 const maxCodeLength = 10;
 
 type AuthStep = "email" | "code";
-type AuthStatus = "idle" | "sending" | "sent" | "verifying" | "error";
+type AuthStatus = "idle" | "sending" | "sent" | "verifying" | "redirecting" | "error";
 type EmailCodeErrorMessageKey = "codeRateLimitError" | "codeUnauthorizedEmailError" | "codeSmtpError" | "codeSendError";
 
 function getAuthErrorDetails(error: unknown) {
@@ -78,6 +79,7 @@ export function EmailCodeForm() {
 
   const isSending = status === "sending";
   const isVerifying = status === "verifying";
+  const isRedirecting = status === "redirecting";
 
   async function sendCode(targetEmail: string) {
     setStatus("sending");
@@ -115,6 +117,24 @@ export function EmailCodeForm() {
     }
 
     await sendCode(normalizedEmail);
+  }
+
+  async function handleGoogleSignIn() {
+    setStatus("redirecting");
+    setMessage("");
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`
+      }
+    });
+
+    if (error) {
+      logAuthError("signInWithOAuth", error, { provider: "google" });
+      setStatus("error");
+      setMessage(t("googleSignInError"));
+    }
   }
 
   async function handleCodeSubmit(event: FormEvent<HTMLFormElement>) {
@@ -159,13 +179,40 @@ export function EmailCodeForm() {
   }
 
   return (
-    <div className="mt-7 grid gap-4">
+    <div className="mt-6 grid gap-4">
+      <button
+        className="relative inline-flex h-11 items-center justify-center rounded-full border border-stone-200 bg-white px-12 text-sm font-semibold text-stone-700 transition hover:bg-stone-50 active:scale-[0.99] disabled:opacity-60"
+        type="button"
+        onClick={handleGoogleSignIn}
+        disabled={isRedirecting}
+      >
+        {isRedirecting ? (
+          <Loader2 className="spin absolute left-5 size-4" />
+        ) : (
+          <Image
+            className="absolute left-5 size-5 object-contain"
+            src="/images/google-g-logo.png"
+            alt=""
+            width={20}
+            height={20}
+            aria-hidden="true"
+          />
+        )}
+        {isRedirecting ? t("googleRedirecting") : t("googleSubmit")}
+      </button>
+
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 text-[0.7rem] font-semibold text-stone-400">
+        <span className="h-px bg-stone-200" />
+        <span>{t("orDivider")}</span>
+        <span className="h-px bg-stone-200" />
+      </div>
+
       {step === "email" ? (
-        <form className="grid gap-4" onSubmit={handleEmailSubmit}>
-          <label className="grid gap-2 text-sm font-semibold text-stone-700" htmlFor="email">
-            {t("emailLabel")}
+        <form className="grid gap-4 text-center" onSubmit={handleEmailSubmit}>
+          <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="email">
+            <span className="sr-only">{t("emailLabel")}</span>
             <input
-              className="h-11 rounded-md border border-stone-300 bg-white px-3 text-base text-stone-950 outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-100"
+              className="h-11 rounded-md border border-stone-200 bg-white px-4 text-sm font-medium text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
               id="email"
               name="email"
               type="email"
@@ -177,20 +224,21 @@ export function EmailCodeForm() {
             />
           </label>
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-stone-950 px-4 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.99] disabled:opacity-60"
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(5,150,105,0.28)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
             type="submit"
             disabled={isSending}
           >
             {isSending ? <Loader2 className="spin size-4" /> : <Mail size={16} />}
             {isSending ? t("codeSending") : t("codeSubmit")}
           </button>
+          <p className="mx-auto max-w-xs text-xs leading-5 text-stone-500">{t("continueNote")}</p>
         </form>
       ) : (
-        <form className="grid gap-4" onSubmit={handleCodeSubmit}>
-          <label className="grid gap-2 text-sm font-semibold text-stone-700" htmlFor="otp-code">
-            {t("codeLabel")}
+        <form className="grid gap-4 text-center" onSubmit={handleCodeSubmit}>
+          <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="otp-code">
+            <span className="sr-only">{t("codeLabel")}</span>
             <input
-              className="h-12 rounded-md border border-stone-300 bg-white px-3 text-center text-xl font-semibold text-stone-950 outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-100"
+              className="h-11 rounded-md border border-stone-200 bg-white px-4 text-center text-base font-semibold text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
               id="otp-code"
               name="otp-code"
               type="text"
@@ -207,16 +255,17 @@ export function EmailCodeForm() {
             </span>
           </label>
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-stone-950 px-4 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.99] disabled:opacity-60"
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(5,150,105,0.28)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
             type="submit"
             disabled={isVerifying}
           >
             {isVerifying ? <Loader2 className="spin size-4" /> : <Check size={16} />}
             {isVerifying ? t("codeVerifying") : t("codeVerify")}
           </button>
+          <p className="mx-auto max-w-xs text-xs leading-5 text-stone-500">{t("continueNote")}</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-stone-300 px-3 text-sm font-semibold text-stone-800 transition hover:bg-stone-100 disabled:opacity-60"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-800 transition hover:bg-stone-50 disabled:opacity-60"
               type="button"
               onClick={() => sendCode(confirmedEmail)}
               disabled={isSending || !confirmedEmail}
@@ -225,7 +274,7 @@ export function EmailCodeForm() {
               {t("codeResend")}
             </button>
             <button
-              className="inline-flex h-10 items-center justify-center rounded-md border border-stone-300 px-3 text-sm font-semibold text-stone-800 transition hover:bg-stone-100"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-800 transition hover:bg-stone-50"
               type="button"
               onClick={changeEmail}
             >
@@ -237,8 +286,8 @@ export function EmailCodeForm() {
 
       {message ? (
         <div
-          className={`rounded-md border px-4 py-3 text-sm leading-6 ${
-            status === "sent" ? "border-teal-200 bg-teal-50 text-teal-900" : "border-red-200 bg-red-50 text-red-800"
+          className={`rounded-xl border px-4 py-3 text-sm leading-6 ${
+            status === "sent" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-800"
           }`}
           role="status"
           aria-live="polite"

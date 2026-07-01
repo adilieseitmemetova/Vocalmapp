@@ -1,4 +1,4 @@
-import { Mail } from "lucide-react";
+import { AudioLines } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 
@@ -20,26 +20,24 @@ export default async function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center px-5 py-10" id="main-content">
-      <section className="grid w-full max-w-5xl overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm md:grid-cols-[0.95fr_1.05fr]">
-        <div className="hidden bg-stone-950 p-8 text-white md:grid">
-          <div className="flex h-full flex-col justify-between">
-            <div className="inline-flex size-11 items-center justify-center rounded-lg bg-white text-stone-950">
-              <Mail size={20} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-stone-300">{t("eyebrow")}</p>
-              <h1 className="mt-3 max-w-sm text-4xl font-bold leading-tight">{common("appName")}</h1>
-              <p className="mt-4 max-w-sm text-sm leading-6 text-stone-300">{t("subtitle")}</p>
-            </div>
-          </div>
+    <main
+      className="relative grid min-h-dvh place-items-center overflow-hidden bg-[#87f0dc] bg-cover bg-center px-5 py-10 sm:px-6"
+      id="main-content"
+      style={{ backgroundImage: "url('/images/auth-green-bg.png')" }}
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(220,255,246,0.18),rgba(35,181,156,0.08)_42%,rgba(12,130,111,0.22)_100%)]" />
+      <section className="relative z-10 flex w-full max-w-[32rem] flex-col items-center gap-6">
+        <div className="flex items-center gap-3 text-white drop-shadow-[0_4px_18px_rgba(0,122,98,0.35)]">
+          <span className="grid size-10 place-items-center rounded-[0.8rem] bg-white/20 text-white ring-1 ring-white/35 backdrop-blur-md">
+            <AudioLines size={21} strokeWidth={2.5} />
+          </span>
+          <span className="text-4xl font-bold leading-none tracking-[0.02em] sm:text-5xl">{common("appName")}</span>
         </div>
-        <div className="p-6 sm:p-8">
-          <p className="text-sm font-semibold text-teal-700">{t("eyebrow")}</p>
-          <h2 className="mt-3 text-3xl font-bold text-stone-950">{t("title")}</h2>
-          <p className="mt-3 max-w-md text-sm leading-6 text-stone-600">{t("subtitle")}</p>
+
+        <div className="w-full rounded-[1.5rem] bg-white p-6 text-center shadow-[0_30px_90px_rgba(0,104,83,0.26)] ring-1 ring-emerald-950/5 sm:p-8">
+          <h1 className="text-2xl font-bold leading-tight text-stone-950 sm:text-[1.7rem]">{t("title")}</h1>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-stone-500">{t("subtitle")}</p>
           <EmailCodeForm />
-          <p className="mt-6 text-xs leading-5 text-stone-500">{t("productionNote")}</p>
         </div>
       </section>
     </main>

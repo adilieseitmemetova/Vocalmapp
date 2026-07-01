@@ -49,6 +49,8 @@
     "invalidCode": "Enter the 6-digit code from your email.",
     "codeSendError": "We could not send the sign-in code. Try again in a moment.",
     "codeRateLimitError": "Supabase has temporarily rate-limited email codes for this address. Wait a few minutes, then request a new code.",
+    "codeUnauthorizedEmailError": "Supabase is refusing this address. Enable custom SMTP in Supabase Auth settings, or test with a project team member email.",
+    "codeSmtpError": "Supabase could not hand this email to the SMTP provider. Check the Supabase Auth SMTP settings and the Resend delivery logs.",
     "codeVerifyError": "The code is incorrect or has expired. Request a new code and try again.",
     "alreadySignedIn": "You are already signed in.",
     "productionNote": "Supabase Auth must use an email template with the one-time token. For repeated testing or production, configure custom SMTP to avoid the default sender limits."
@@ -107,6 +109,8 @@
     "emptyWorkspaceBody": "Find a song, paste lyrics, then add colored vocal markers and reference audio to lines or words.",
     "selectedLine": "Line",
     "selectedWord": "Word",
+    "selectedRange": "Selection",
+    "selectedRangeCount": "{count, plural, one {# word} other {# words}}",
     "markerActiveTitle": "{meaning}. Press again to remove.",
     "markerInactiveTitle": "{meaning}. Press to add.",
     "unsupportedRecording": "This browser does not support audio recording.",

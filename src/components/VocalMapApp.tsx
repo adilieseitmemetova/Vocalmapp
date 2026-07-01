@@ -37,11 +37,14 @@ import type {
   AudioReference,
   InitialVocalMapData,
   LineAnnotation,
+  LyricsSelection,
   LyricLine,
   LyricWord,
   Marker,
   MarkerIconName,
+  SelectedRangeTarget,
   SelectedTarget,
+  SelectedWordPoint,
   Song,
   SongDraft,
   SpotifyTrackResult,
@@ -198,16 +201,190 @@ function buildSongFromDraft(draft: SongDraft, fallbackTitle: string, existingSon
   };
 }
 
-function selectedTargetKey(target: SelectedTarget | null) {
+type SelectedWordAddress = {
+  line: LyricLine;
+  word: LyricWord;
+  lineIndex: number;
+  wordIndex: number;
+};
+
+type SelectedData =
+  | {
+      type: "line";
+      label: string;
+      annotations: LineAnnotation[];
+      audioReference?: AudioReference;
+    }
+  | {
+      type: "word";
+      label: string;
+      annotations: WordAnnotation[];
+      audioReference?: AudioReference;
+    }
+  | {
+      type: "range";
+      label: string;
+      annotations: WordAnnotation[];
+      wordTargets: Array<{
+        lineId: string;
+        wordId: string;
+        annotations: WordAnnotation[];
+      }>;
+    };
+
+function selectedTargetKey(target: LyricsSelection | null) {
   if (!target) {
     return "";
+  }
+  if (target.type === "range") {
+    return `${target.songId}:range:${target.anchor.lineId}:${target.anchor.wordId}:${target.focus.lineId}:${target.focus.wordId}`;
   }
   return `${target.songId}:${target.type}:${target.lineId}:${target.wordId ?? ""}`;
 }
 
-function findSelectedData(song: Song | undefined, selection: SelectedTarget | null, emptyLineLabel: string) {
+function sameWordPoint(first: SelectedWordPoint, second: SelectedWordPoint) {
+  return first.lineId === second.lineId && first.wordId === second.wordId;
+}
+
+function collectWordAddresses(song: Song) {
+  const addresses: SelectedWordAddress[] = [];
+
+  song.lyrics.forEach((line, lineIndex) => {
+    line.words.forEach((word, wordIndex) => {
+      addresses.push({ line, word, lineIndex, wordIndex });
+    });
+  });
+
+  return addresses;
+}
+
+function findWordAddressIndex(addresses: SelectedWordAddress[], point: SelectedWordPoint) {
+  return addresses.findIndex((address) => address.line.id === point.lineId && address.word.id === point.wordId);
+}
+
+function selectedWordAddresses(song: Song, selection: LyricsSelection | null) {
+  if (!selection || selection.type === "line") {
+    return [];
+  }
+
+  const addresses = collectWordAddresses(song);
+  if (selection.type === "word") {
+    const index = findWordAddressIndex(addresses, { lineId: selection.lineId, wordId: selection.wordId });
+    return index >= 0 ? [addresses[index]] : [];
+  }
+
+  const anchorIndex = findWordAddressIndex(addresses, selection.anchor);
+  const focusIndex = findWordAddressIndex(addresses, selection.focus);
+  if (anchorIndex < 0 || focusIndex < 0) {
+    return [];
+  }
+
+  const startIndex = Math.min(anchorIndex, focusIndex);
+  const endIndex = Math.max(anchorIndex, focusIndex);
+  return addresses.slice(startIndex, endIndex + 1);
+}
+
+function buildRangeLabel(addresses: SelectedWordAddress[]) {
+  const lineParts: string[] = [];
+  let currentLineIndex = -1;
+
+  for (const address of addresses) {
+    if (address.lineIndex !== currentLineIndex) {
+      currentLineIndex = address.lineIndex;
+      lineParts.push(address.word.text);
+    } else {
+      lineParts[lineParts.length - 1] = `${lineParts[lineParts.length - 1]} ${address.word.text}`;
+    }
+  }
+
+  return lineParts.join(" / ");
+}
+
+function commonRangeAnnotations(addresses: SelectedWordAddress[]) {
+  const [firstAddress] = addresses;
+  if (!firstAddress) {
+    return [];
+  }
+
+  return firstAddress.word.annotations.filter((annotation) =>
+    addresses.every((address) => address.word.annotations.some((item) => item.markerId === annotation.markerId))
+  );
+}
+
+function selectionShiftAnchor(song: Song | undefined, selection: LyricsSelection | null, songId: string): SelectedWordPoint | null {
+  if (!song || !selection || selection.songId !== songId) {
+    return null;
+  }
+
+  if (selection.type === "word") {
+    return { lineId: selection.lineId, wordId: selection.wordId };
+  }
+
+  if (selection.type === "range") {
+    return selection.anchor;
+  }
+
+  const line = song.lyrics.find((item) => item.id === selection.lineId);
+  const firstWord = line?.words[0];
+  return firstWord ? { lineId: line.id, wordId: firstWord.id } : null;
+}
+
+function wordPointFromElement(element: Element | null): (SelectedWordPoint & { songId: string }) | null {
+  const wordElement = element?.closest<HTMLElement>("[data-song-id][data-line-id][data-word-id]");
+  const songId = wordElement?.dataset.songId;
+  const lineId = wordElement?.dataset.lineId;
+  const wordId = wordElement?.dataset.wordId;
+
+  if (!songId || !lineId || !wordId) {
+    return null;
+  }
+
+  return { songId, lineId, wordId };
+}
+
+function makeWordOrRangeSelection(songId: string, anchor: SelectedWordPoint, focus: SelectedWordPoint, x: number, y: number): LyricsSelection {
+  if (sameWordPoint(anchor, focus)) {
+    return {
+      songId,
+      type: "word",
+      lineId: focus.lineId,
+      wordId: focus.wordId,
+      x,
+      y
+    };
+  }
+
+  return {
+    songId,
+    type: "range",
+    anchor,
+    focus,
+    x,
+    y
+  };
+}
+
+function findSelectedData(song: Song | undefined, selection: LyricsSelection | null, emptyLineLabel: string): SelectedData | null {
   if (!song || !selection) {
     return null;
+  }
+
+  if (selection.type === "range") {
+    const addresses = selectedWordAddresses(song, selection);
+    if (addresses.length === 0) {
+      return null;
+    }
+
+    return {
+      type: "range",
+      label: buildRangeLabel(addresses),
+      annotations: commonRangeAnnotations(addresses),
+      wordTargets: addresses.map((address) => ({
+        lineId: address.line.id,
+        wordId: address.word.id,
+        annotations: address.word.annotations
+      }))
+    };
   }
 
   const line = song.lyrics.find((item) => item.id === selection.lineId);
@@ -325,52 +502,68 @@ function LyricsLine({
   line,
   songId,
   onSelect,
+  onWordPointerDown,
+  onWordPointerMove,
+  onWordPointerUp,
+  onWordPointerCancel,
+  onWordKeyboardSelect,
   onPlayAudio,
   markerById,
+  selectedLineId,
+  selectedWordIds,
   labels
 }: {
   line: LyricLine;
   songId: string;
   onSelect: (target: SelectedTarget) => void;
+  onWordPointerDown: (event: React.PointerEvent<HTMLButtonElement>, lineId: string, wordId: string) => void;
+  onWordPointerMove: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onWordPointerUp: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onWordPointerCancel: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onWordKeyboardSelect: (lineId: string, wordId: string, element: HTMLElement) => void;
   onPlayAudio: (audioReference: AudioReference) => void;
   markerById: Map<string, Marker>;
+  selectedLineId: string | null;
+  selectedWordIds: Set<string>;
   labels: {
     emptyLine: string;
     lineAudio: string;
     wordAudio: string;
   };
 }) {
-  function selectLine(event: React.MouseEvent) {
+  const lineIsSelected = selectedLineId === line.id;
+
+  function selectLineAt(x: number, y: number) {
     onSelect({
       songId,
       type: "line",
       lineId: line.id,
-      x: event.clientX,
-      y: event.clientY
+      x,
+      y
     });
   }
 
-  function selectWord(event: React.MouseEvent, word: LyricWord) {
-    event.stopPropagation();
-    onSelect({
-      songId,
-      type: "word",
-      lineId: line.id,
-      wordId: word.id,
-      x: event.clientX,
-      y: event.clientY
-    });
+  function selectLine(event: React.MouseEvent) {
+    selectLineAt(event.clientX, event.clientY);
+  }
+
+  function selectLineFromElement(element: HTMLElement) {
+    const rect = element.getBoundingClientRect();
+    selectLineAt(rect.left + rect.width / 2, rect.top + rect.height / 2);
   }
 
   return (
     <div
-      className="grid min-h-12 grid-cols-1 gap-1 rounded-md border border-transparent px-3 py-2 transition hover:border-stone-200 hover:bg-stone-50 lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4"
+      className={`grid min-h-12 grid-cols-1 gap-1 rounded-md border px-3 py-2 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
+        lineIsSelected ? "border-teal-200 bg-teal-50" : "border-transparent hover:border-stone-200 hover:bg-stone-50"
+      }`}
       onClick={selectLine}
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
-          selectLine(event as unknown as React.MouseEvent);
+          event.preventDefault();
+          selectLineFromElement(event.currentTarget);
         }
       }}
     >
@@ -384,23 +577,49 @@ function LyricsLine({
         {line.words.length === 0 ? (
           <span className="text-sm text-stone-400">{labels.emptyLine}</span>
         ) : (
-          line.words.map((word) => (
-            <span className="inline-flex min-w-0 flex-col items-center gap-0.5 rounded-md" key={word.id}>
-              <span className="flex min-h-[18px] flex-wrap items-center justify-center gap-1">
-                {word.annotations.map((annotation) => (
-                  <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
-                ))}
-                {word.audioReference ? <AudioDot onPlay={() => onPlayAudio(word.audioReference!)} title={labels.wordAudio} /> : null}
+          line.words.map((word) => {
+            const wordIsSelected = selectedWordIds.has(word.id);
+
+            return (
+              <span className="inline-flex min-w-0 flex-col items-center gap-0.5 rounded-md" key={word.id}>
+                <span className="flex min-h-[18px] flex-wrap items-center justify-center gap-1">
+                  {word.annotations.map((annotation) => (
+                    <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
+                  ))}
+                  {word.audioReference ? <AudioDot onPlay={() => onPlayAudio(word.audioReference!)} title={labels.wordAudio} /> : null}
+                </span>
+                <button
+                  className={`max-w-full touch-none select-none rounded px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-teal-200 ${
+                    wordIsSelected ? "bg-teal-100 ring-2 ring-teal-200" : "hover:bg-teal-50 hover:ring-2 hover:ring-teal-100 focus:bg-teal-50"
+                  }`}
+                  type="button"
+                  data-song-id={songId}
+                  data-line-id={line.id}
+                  data-word-id={word.id}
+                  onPointerDown={(event) => onWordPointerDown(event, line.id, word.id)}
+                  onPointerMove={onWordPointerMove}
+                  onPointerUp={onWordPointerUp}
+                  onPointerCancel={onWordPointerCancel}
+                  onLostPointerCapture={onWordPointerCancel}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (event.detail === 0) {
+                      onWordKeyboardSelect(line.id, word.id, event.currentTarget);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onWordKeyboardSelect(line.id, word.id, event.currentTarget);
+                    }
+                  }}
+                >
+                  {word.text}
+                </button>
               </span>
-              <button
-                className="max-w-full rounded px-1 py-0.5 leading-tight text-inherit transition hover:bg-teal-50 hover:ring-2 hover:ring-teal-100 focus:bg-teal-50 focus:outline-none focus:ring-2 focus:ring-teal-200"
-                type="button"
-                onClick={(event) => selectWord(event, word)}
-              >
-                {word.text}
-              </button>
-            </span>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -476,7 +695,8 @@ export function VocalMapApp({
   const [localSearch, setLocalSearch] = useState("");
   const [draft, setDraft] = useState<SongDraft>(EMPTY_DRAFT);
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
-  const [selection, setSelection] = useState<SelectedTarget | null>(null);
+  const [selection, setSelection] = useState<LyricsSelection | null>(null);
+  const [isSelectingWords, setIsSelectingWords] = useState(false);
   const [spotifyQuery, setSpotifyQuery] = useState("");
   const [spotifyResults, setSpotifyResults] = useState<SpotifyTrackResult[]>([]);
   const [spotifyMessage, setSpotifyMessage] = useState("");
@@ -491,6 +711,12 @@ export function VocalMapApp({
   const recorderStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordingSelectionRef = useRef<SelectedTarget | null>(null);
+  const wordSelectionDragRef = useRef<{
+    pointerId: number;
+    songId: string;
+    anchor: SelectedWordPoint;
+    focus: SelectedWordPoint;
+  } | null>(null);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -515,6 +741,8 @@ export function VocalMapApp({
   const activeSong = useMemo(() => songs.find((song) => song.id === effectiveActiveSongId), [effectiveActiveSongId, songs]);
   const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
   const selectedData = useMemo(() => findSelectedData(activeSong, selection, common("emptyLine")), [activeSong, common, selection]);
+  const selectedWordIds = useMemo(() => new Set(activeSong ? selectedWordAddresses(activeSong, selection).map((address) => address.word.id) : []), [activeSong, selection]);
+  const selectedLineId = selection?.type === "line" ? selection.lineId : null;
   const currentTargetKey = selectedTargetKey(selection);
 
   const filteredSongs = useMemo(() => {
@@ -861,6 +1089,104 @@ export function VocalMapApp({
     setImportingTrackId(null);
   }
 
+  function beginWordSelection(event: React.PointerEvent<HTMLButtonElement>, lineId: string, wordId: string) {
+    if (!activeSong) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is a progressive enhancement for touch/mouse drag stability.
+    }
+
+    const focus = { lineId, wordId };
+    const anchor = event.shiftKey ? selectionShiftAnchor(activeSong, selection, activeSong.id) ?? focus : focus;
+
+    wordSelectionDragRef.current = {
+      pointerId: event.pointerId,
+      songId: activeSong.id,
+      anchor,
+      focus
+    };
+
+    setIsSelectingWords(true);
+    setSelection(makeWordOrRangeSelection(activeSong.id, anchor, focus, event.clientX, event.clientY));
+  }
+
+  function updateWordSelectionFromPointer(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = wordSelectionDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const hoveredWord = wordPointFromElement(document.elementFromPoint(event.clientX, event.clientY));
+    if (!hoveredWord || hoveredWord.songId !== dragState.songId) {
+      return;
+    }
+
+    const focus = { lineId: hoveredWord.lineId, wordId: hoveredWord.wordId };
+    if (sameWordPoint(dragState.focus, focus)) {
+      return;
+    }
+
+    wordSelectionDragRef.current = {
+      ...dragState,
+      focus
+    };
+    setSelection(makeWordOrRangeSelection(dragState.songId, dragState.anchor, focus, event.clientX, event.clientY));
+  }
+
+  function finishWordSelection(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = wordSelectionDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    updateWordSelectionFromPointer(event);
+    wordSelectionDragRef.current = null;
+    setIsSelectingWords(false);
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already be released by the browser.
+    }
+  }
+
+  function cancelWordSelection(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = wordSelectionDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.stopPropagation();
+    wordSelectionDragRef.current = null;
+    setIsSelectingWords(false);
+  }
+
+  function selectWordFromKeyboard(lineId: string, wordId: string, element: HTMLElement) {
+    if (!activeSong) {
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    setSelection({
+      songId: activeSong.id,
+      type: "word",
+      lineId,
+      wordId,
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
+    });
+  }
+
   function updateSelectedTarget(
     target: SelectedTarget,
     updater: (payload: {
@@ -928,8 +1254,123 @@ export function VocalMapApp({
     );
   }
 
+  function updateSelectedRangeTarget(
+    target: SelectedRangeTarget,
+    updater: (payload: {
+      lineId: string;
+      wordId: string;
+      annotations: WordAnnotation[];
+    }) => {
+      annotations?: WordAnnotation[];
+    }
+  ) {
+    const now = new Date().toISOString();
+
+    setSongs((currentSongs) =>
+      currentSongs.map((song) => {
+        if (song.id !== target.songId) {
+          return song;
+        }
+
+        const selectedWordIdsForSong = new Set(selectedWordAddresses(song, target).map((address) => address.word.id));
+        if (selectedWordIdsForSong.size === 0) {
+          return song;
+        }
+
+        return {
+          ...song,
+          lyrics: song.lyrics.map((line) => ({
+            ...line,
+            words: line.words.map((word) => {
+              if (!selectedWordIdsForSong.has(word.id)) {
+                return word;
+              }
+
+              const result = updater({
+                lineId: line.id,
+                wordId: word.id,
+                annotations: word.annotations
+              });
+
+              return {
+                ...word,
+                annotations: result.annotations ?? word.annotations
+              };
+            })
+          })),
+          updatedAt: now
+        };
+      })
+    );
+  }
+
   async function toggleMarker(markerId: string) {
     if (!selection || !activeSong || !selectedData) {
+      return;
+    }
+
+    if (selection.type === "range") {
+      if (selectedData.type !== "range" || selectedData.wordTargets.length === 0) {
+        return;
+      }
+
+      const markerIsActiveEverywhere = selectedData.wordTargets.every((target) => target.annotations.some((annotation) => annotation.markerId === markerId));
+
+      if (markerIsActiveEverywhere) {
+        const annotationIds = selectedData.wordTargets.flatMap((target) => target.annotations.filter((annotation) => annotation.markerId === markerId).map((annotation) => annotation.id));
+        if (annotationIds.length === 0) {
+          return;
+        }
+
+        const { error } = await supabase.from("annotations").delete().eq("user_id", userId).in("id", annotationIds);
+        if (error) {
+          setStatusMessage(t("saveFailed"));
+          return;
+        }
+
+        updateSelectedRangeTarget(selection, ({ annotations }) => ({
+          annotations: annotations.filter((annotation) => annotation.markerId !== markerId)
+        }));
+        return;
+      }
+
+      const missingTargets = selectedData.wordTargets.filter((target) => !target.annotations.some((annotation) => annotation.markerId === markerId));
+      if (missingTargets.length === 0) {
+        return;
+      }
+
+      const annotationByWordId = new Map<string, string>();
+      const annotationRows: TablesInsert<"annotations">[] = missingTargets.map((target) => {
+        const annotationId = createId();
+        annotationByWordId.set(target.wordId, annotationId);
+
+        return {
+          id: annotationId,
+          user_id: userId,
+          song_id: selection.songId,
+          line_id: target.lineId,
+          word_id: target.wordId,
+          target_type: "word",
+          marker_id: markerId
+        };
+      });
+
+      const { error } = await supabase.from("annotations").insert(annotationRows);
+      if (error) {
+        setStatusMessage(t("saveFailed"));
+        return;
+      }
+
+      updateSelectedRangeTarget(selection, ({ wordId, annotations }) => {
+        const annotationId = annotationByWordId.get(wordId);
+        if (!annotationId || annotations.some((annotation) => annotation.markerId === markerId)) {
+          return {};
+        }
+
+        return {
+          annotations: [...annotations, { id: annotationId, markerId }]
+        };
+      });
       return;
     }
 
@@ -982,10 +1423,8 @@ export function VocalMapApp({
     }
 
     const audioReference = makeAudioReference(storagePath, blob, audioId);
-    const existingAudio =
-      target.type === "song"
-        ? songs.find((song) => song.id === target.songId)?.songAudio
-        : findSelectedData(songs.find((song) => song.id === target.songId), target, common("emptyLine"))?.audioReference;
+    const existingSelectedData = target.type === "song" ? null : findSelectedData(songs.find((song) => song.id === target.songId), target, common("emptyLine"));
+    const existingAudio = target.type === "song" ? songs.find((song) => song.id === target.songId)?.songAudio : existingSelectedData?.type === "range" ? undefined : existingSelectedData?.audioReference;
 
     if (existingAudio) {
       const { error } = await supabase.from("audio_references").delete().eq("id", existingAudio.id).eq("user_id", userId);
@@ -1019,7 +1458,7 @@ export function VocalMapApp({
   }
 
   async function removeAudioReferenceFromSelection() {
-    if (!selection || !selectedData?.audioReference) {
+    if (!selection || selection.type === "range" || selectedData?.type === "range" || !selectedData?.audioReference) {
       return;
     }
 
@@ -1036,7 +1475,7 @@ export function VocalMapApp({
   }
 
   async function startRecording() {
-    if (!selection) {
+    if (!selection || selection.type === "range") {
       return;
     }
 
@@ -1446,9 +1885,16 @@ export function VocalMapApp({
                     key={line.id}
                     line={line}
                     songId={activeSong.id}
-                    onSelect={setSelection}
+                    onSelect={(target) => setSelection(target)}
+                    onWordPointerDown={beginWordSelection}
+                    onWordPointerMove={updateWordSelectionFromPointer}
+                    onWordPointerUp={finishWordSelection}
+                    onWordPointerCancel={cancelWordSelection}
+                    onWordKeyboardSelect={selectWordFromKeyboard}
                     onPlayAudio={(audioReference) => void playAudioReference(audioReference)}
                     markerById={markerById}
+                    selectedLineId={selectedLineId}
+                    selectedWordIds={selectedWordIds}
                     labels={{
                       emptyLine: common("emptyLine"),
                       lineAudio: t("lineAudioTitle"),
@@ -1474,12 +1920,15 @@ export function VocalMapApp({
         )}
       </section>
 
-      {selection && selectedData ? (
+      {selection && selectedData && !isSelectingWords ? (
         <div className="fixed z-20 w-[min(23.25rem,calc(100vw-1.5rem))] rounded-lg border border-stone-200 bg-white/95 p-3 shadow-2xl backdrop-blur" style={popoverStyle}>
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-bold uppercase text-stone-500">{selectedData.type === "line" ? t("selectedLine") : t("selectedWord")}</p>
-              <strong className="block truncate text-sm leading-6 text-stone-950">{selectedData.label}</strong>
+              <p className="text-xs font-bold uppercase text-stone-500">{selectedData.type === "line" ? t("selectedLine") : selectedData.type === "range" ? t("selectedRange") : t("selectedWord")}</p>
+              <strong className="block truncate text-sm leading-6 text-stone-950" title={selectedData.label}>
+                {selectedData.type === "range" ? t("selectedRangeCount", { count: selectedData.wordTargets.length }) : selectedData.label}
+              </strong>
+              {selectedData.type === "range" ? <span className="block truncate text-xs leading-5 text-stone-500">{selectedData.label}</span> : null}
             </div>
             <button className={`${iconButtonClass} size-8 border-transparent`} type="button" onClick={() => setSelection(null)} title={common("close")}>
               <X size={15} />
@@ -1508,31 +1957,33 @@ export function VocalMapApp({
             })}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-3">
-            {recordingTarget === currentTargetKey ? (
-              <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800" type="button" onClick={stopRecording}>
-                <Square size={15} fill="currentColor" />
-                {common("stop")}
-              </button>
-            ) : (
-              <button className={secondaryButtonClass} type="button" onClick={() => void startRecording()}>
-                <Mic size={15} />
-                {common("recordAudio")}
-              </button>
-            )}
+          {selectedData.type !== "range" ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-3">
+              {recordingTarget === currentTargetKey ? (
+                <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800" type="button" onClick={stopRecording}>
+                  <Square size={15} fill="currentColor" />
+                  {common("stop")}
+                </button>
+              ) : (
+                <button className={secondaryButtonClass} type="button" onClick={() => void startRecording()}>
+                  <Mic size={15} />
+                  {common("recordAudio")}
+                </button>
+              )}
 
-            {selectedData.audioReference ? (
-              <>
-                <button className={secondaryButtonClass} type="button" onClick={() => void playAudioReference(selectedData.audioReference!)}>
-                  <Play size={15} fill="currentColor" />
-                  {common("play")}
-                </button>
-                <button className={`${iconButtonClass} text-red-700`} type="button" onClick={() => void removeAudioReferenceFromSelection()} title={common("delete")}>
-                  <Trash2 size={15} />
-                </button>
-              </>
-            ) : null}
-          </div>
+              {selectedData.audioReference ? (
+                <>
+                  <button className={secondaryButtonClass} type="button" onClick={() => void playAudioReference(selectedData.audioReference!)}>
+                    <Play size={15} fill="currentColor" />
+                    {common("play")}
+                  </button>
+                  <button className={`${iconButtonClass} text-red-700`} type="button" onClick={() => void removeAudioReferenceFromSelection()} title={common("delete")}>
+                    <Trash2 size={15} />
+                  </button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -110,10 +110,34 @@ export type SelectedTarget = {
   songId: string;
   type: TargetType;
   lineId: string;
-  wordId?: string;
+  x: number;
+  y: number;
+} & (
+  | {
+      type: "line";
+      wordId?: never;
+    }
+  | {
+      type: "word";
+      wordId: string;
+    }
+);
+
+export type SelectedWordPoint = {
+  lineId: string;
+  wordId: string;
+};
+
+export type SelectedRangeTarget = {
+  songId: string;
+  type: "range";
+  anchor: SelectedWordPoint;
+  focus: SelectedWordPoint;
   x: number;
   y: number;
 };
+
+export type LyricsSelection = SelectedTarget | SelectedRangeTarget;
 
 export type SongDraft = {
   id?: string;

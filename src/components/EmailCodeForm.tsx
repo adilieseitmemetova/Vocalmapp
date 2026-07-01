@@ -12,13 +12,49 @@ const codePattern = /^\d{6}$/;
 
 type AuthStep = "email" | "code";
 type AuthStatus = "idle" | "sending" | "sent" | "verifying" | "error";
+type EmailCodeErrorMessageKey = "codeRateLimitError" | "codeUnauthorizedEmailError" | "codeSmtpError" | "codeSendError";
 
-function isEmailRateLimitError(error: unknown) {
+function getAuthErrorDetails(error: unknown) {
   const maybeError = error as { code?: string; message?: string; status?: number };
-  const message = maybeError.message?.toLowerCase() ?? "";
-  const code = maybeError.code?.toLowerCase() ?? "";
 
-  return maybeError.status === 429 || code.includes("rate") || message.includes("rate limit");
+  return {
+    code: maybeError.code?.toLowerCase() ?? "",
+    message: maybeError.message?.toLowerCase() ?? "",
+    status: maybeError.status
+  };
+}
+
+function getEmailCodeErrorMessageKey(error: unknown): EmailCodeErrorMessageKey {
+  const { code, message, status } = getAuthErrorDetails(error);
+
+  if (status === 429 || code.includes("rate") || message.includes("rate limit")) {
+    return "codeRateLimitError";
+  }
+
+  if (message.includes("not authorized") || code.includes("not_authorized")) {
+    return "codeUnauthorizedEmailError";
+  }
+
+  if (status === 500 || message.includes("smtp") || message.includes("email provider") || message.includes("sending")) {
+    return "codeSmtpError";
+  }
+
+  return "codeSendError";
+}
+
+function logAuthError(error: unknown) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
+
+  const maybeError = error as { code?: string; message?: string; name?: string; status?: number };
+  // Keep email addresses and keys out of logs; Supabase Auth logs have request-level detail.
+  console.warn("Supabase signInWithOtp failed", {
+    code: maybeError.code,
+    message: maybeError.message,
+    name: maybeError.name,
+    status: maybeError.status
+  });
 }
 
 export function EmailCodeForm() {
@@ -47,8 +83,9 @@ export function EmailCodeForm() {
     });
 
     if (error) {
+      logAuthError(error);
       setStatus("error");
-      setMessage(isEmailRateLimitError(error) ? t("codeRateLimitError") : t("codeSendError"));
+      setMessage(t(getEmailCodeErrorMessageKey(error)));
       return;
     }
 

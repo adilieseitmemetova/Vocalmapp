@@ -21,3 +21,4 @@ pnpm-debug.log*
 supabase/.temp/
 
 .DS_Store
+.vercel

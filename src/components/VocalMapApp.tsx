@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  AudioLines,
+  ChevronDown,
   ExternalLink,
   FileText,
   Library,
@@ -16,6 +18,7 @@ import {
   Square,
   Trash2,
   Upload,
+  UserRound,
   X
 } from "lucide-react";
 import Image from "next/image";
@@ -48,10 +51,13 @@ import type {
   Song,
   SongDraft,
   SpotifyTrackResult,
+  UserProfile,
   WordAnnotation
 } from "@/types";
 
 const AUDIO_BUCKET = "vocalmap-audio";
+const PROFILE_STORAGE_KEY = "vocalmapp:profile:v1";
+const MARKER_PREFERENCES_STORAGE_PREFIX = "vocalmapp:marker-preferences";
 
 const EMPTY_DRAFT: SongDraft = {
   title: "",
@@ -66,14 +72,53 @@ const EMPTY_CUSTOM_MARKER: { label: string; meaning: string; color: string; icon
   icon: "spark"
 };
 
+type MarkerDraft = typeof EMPTY_CUSTOM_MARKER;
+type MarkerPreferences = {
+  hiddenSystemMarkerIds: string[];
+  systemOverrides: Record<string, MarkerDraft>;
+};
+type SpotifySearchErrorCode = "authRequired" | "queryRequired" | "queryTooLong" | "searchFailed" | "missingCredentials" | "unavailable";
+
+const spotifySearchErrorMessageKeys: Record<SpotifySearchErrorCode, string> = {
+  authRequired: "spotifyAuthRequired",
+  queryRequired: "queryRequired",
+  queryTooLong: "spotifyQueryTooLong",
+  searchFailed: "spotifySearchFailed",
+  missingCredentials: "spotifyMissingCredentials",
+  unavailable: "spotifyUnavailable"
+};
+const systemMarkerIds = new Set([
+  "up",
+  "down",
+  "vib",
+  "hold",
+  "breath",
+  "accent",
+  "soft",
+  "strong",
+  "slide-up",
+  "slide-down",
+  "legato",
+  "pause",
+  "cut",
+  "run",
+  "mix",
+  "head",
+  "chest",
+  "falsetto",
+  "twang",
+  "cry",
+  "mute"
+]);
+
 const primaryButtonClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 active:scale-[0.99] disabled:opacity-60";
+  "inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_12px_26px_rgba(5,150,105,0.22)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
 const secondaryButtonClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-800 transition hover:border-stone-300 hover:bg-stone-50 active:scale-[0.99] disabled:opacity-60";
+  "inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-800 transition hover:border-emerald-200 hover:bg-emerald-50 active:scale-[0.99] disabled:opacity-60";
 const iconButtonClass =
-  "inline-grid size-10 flex-none place-items-center rounded-md border border-stone-200 bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:opacity-60";
+  "inline-grid size-10 flex-none place-items-center rounded-xl border border-stone-200 bg-white text-stone-700 transition hover:border-emerald-200 hover:bg-emerald-50 disabled:opacity-60";
 const inputClass =
-  "h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-100";
+  "h-10 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100";
 
 function createId() {
   return crypto.randomUUID();
@@ -164,6 +209,10 @@ function collectRemovedAudioPaths(previousSong: Song | undefined, nextSong: Song
 
   const nextPaths = new Set(collectAudioPaths(nextSong));
   return collectAudioPaths(previousSong).filter((path) => !nextPaths.has(path));
+}
+
+function markerPreferencesKey(userId: string) {
+  return `${MARKER_PREFERENCES_STORAGE_PREFIX}:${userId}`;
 }
 
 function songToDraft(song: Song): SongDraft {
@@ -437,7 +486,7 @@ function MarkerBadge({ markerId, markerById }: { markerId: string; markerById: M
 function AudioDot({ onPlay, title }: { onPlay: () => void; title: string }) {
   return (
     <button
-      className="inline-grid size-[18px] place-items-center rounded-full border border-teal-200 bg-teal-50 text-teal-700 transition hover:bg-teal-100"
+      className="inline-grid size-[18px] place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
       type="button"
       title={title}
       onClick={onPlay}
@@ -554,8 +603,8 @@ function LyricsLine({
 
   return (
     <div
-      className={`grid min-h-12 grid-cols-1 gap-1 rounded-md border px-3 py-2 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
-        lineIsSelected ? "border-teal-200 bg-teal-50" : "border-transparent hover:border-stone-200 hover:bg-stone-50"
+      className={`grid min-h-12 grid-cols-1 gap-1 rounded-xl border px-3 py-2 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
+        lineIsSelected ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
       }`}
       onClick={selectLine}
       role="button"
@@ -589,8 +638,8 @@ function LyricsLine({
                   {word.audioReference ? <AudioDot onPlay={() => onPlayAudio(word.audioReference!)} title={labels.wordAudio} /> : null}
                 </span>
                 <button
-                  className={`max-w-full touch-none select-none rounded px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-teal-200 ${
-                    wordIsSelected ? "bg-teal-100 ring-2 ring-teal-200" : "hover:bg-teal-50 hover:ring-2 hover:ring-teal-100 focus:bg-teal-50"
+                  className={`max-w-full touch-none select-none rounded px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-emerald-200 ${
+                    wordIsSelected ? "bg-emerald-100 ring-2 ring-emerald-200" : "hover:bg-emerald-50 hover:ring-2 hover:ring-emerald-100 focus:bg-emerald-50"
                   }`}
                   type="button"
                   data-song-id={songId}
@@ -645,7 +694,7 @@ function SongAudioUploader({
   };
 }) {
   return (
-    <div className="mx-auto mb-5 flex max-w-6xl flex-col gap-3 rounded-lg border border-stone-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="mx-auto mb-5 flex max-w-6xl flex-col gap-3 rounded-[1.25rem] border border-white/70 bg-white/[0.9] p-4 shadow-[0_18px_50px_rgba(0,104,83,0.12)] backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
       <div>
         <p className="text-xs font-bold uppercase text-stone-500">{labels.title}</p>
         <p className="mt-1 text-sm leading-5 text-stone-600">{labels.help}</p>
@@ -675,11 +724,13 @@ function SongAudioUploader({
 
 export function VocalMapApp({
   initialData,
+  initialProfile,
   userEmail,
   userId,
   signOutAction
 }: {
   initialData: InitialVocalMapData;
+  initialProfile: UserProfile;
   userEmail: string;
   userId: string;
   signOutAction: () => Promise<void>;
@@ -688,11 +739,31 @@ export function VocalMapApp({
   const common = useTranslations("common");
   const markerIconLabels = useTranslations("markerIcons");
   const supabase = useMemo(() => createClient(), []);
+  const translatedInitialMarkers = useMemo(
+    () =>
+      initialData.markers.map((marker) =>
+        marker.isSystem && systemMarkerIds.has(marker.id)
+          ? {
+              ...marker,
+              label: t(`systemMarkers.${marker.id}.label`),
+              meaning: t(`systemMarkers.${marker.id}.meaning`)
+            }
+          : marker
+      ),
+    [initialData.markers, t]
+  );
   const [songs, setSongs] = useState<Song[]>(initialData.songs);
-  const [markers, setMarkers] = useState<Marker[]>(initialData.markers);
+  const [markers, setMarkers] = useState<Marker[]>(translatedInitialMarkers);
   const [customMarkerDraft, setCustomMarkerDraft] = useState(EMPTY_CUSTOM_MARKER);
+  const [isMarkerPanelOpen, setIsMarkerPanelOpen] = useState(false);
+  const [isMarkerFormOpen, setIsMarkerFormOpen] = useState(false);
+  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  const [hiddenSystemMarkerIds, setHiddenSystemMarkerIds] = useState<Set<string>>(() => new Set());
+  const [systemMarkerOverrides, setSystemMarkerOverrides] = useState<Record<string, MarkerDraft>>({});
   const [activeSongId, setActiveSongId] = useState<string | null>(initialData.songs[0]?.id ?? null);
   const [localSearch, setLocalSearch] = useState("");
+  const [isSongSearchOpen, setIsSongSearchOpen] = useState(false);
   const [draft, setDraft] = useState<SongDraft>(EMPTY_DRAFT);
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
   const [selection, setSelection] = useState<LyricsSelection | null>(null);
@@ -706,6 +777,15 @@ export function VocalMapApp({
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [hasLocalData, setHasLocalData] = useState(false);
+  const [profile, setProfile] = useState<UserProfile>(initialProfile);
+  const [profileDraft, setProfileDraft] = useState({
+    displayName: initialProfile.displayName ?? "",
+    vocalGoal: initialProfile.vocalGoal ?? ""
+  });
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isProfileGateReady, setIsProfileGateReady] = useState(initialProfile.onboardingCompleted);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState("");
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderStreamRef = useRef<MediaStream | null>(null);
@@ -737,9 +817,87 @@ export function VocalMapApp({
     return () => window.clearTimeout(timeoutId);
   }, []);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const storedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
+      if (!storedProfile) {
+        setIsProfileModalOpen(!initialProfile.onboardingCompleted);
+        setIsProfileGateReady(true);
+        return;
+      }
+
+      try {
+        const parsedProfile = JSON.parse(storedProfile) as Partial<UserProfile>;
+        if (parsedProfile.id !== userId || !parsedProfile.onboardingCompleted) {
+          setIsProfileModalOpen(!initialProfile.onboardingCompleted);
+          setIsProfileGateReady(true);
+          return;
+        }
+
+        setProfile((currentProfile) => {
+          const nextProfile: UserProfile = {
+            id: userId,
+            email: currentProfile.email ?? userEmail,
+            displayName: currentProfile.displayName ?? parsedProfile.displayName ?? null,
+            vocalGoal: currentProfile.vocalGoal ?? parsedProfile.vocalGoal ?? null,
+            onboardingCompleted: currentProfile.onboardingCompleted || Boolean(parsedProfile.onboardingCompleted)
+          };
+
+          setProfileDraft({
+            displayName: nextProfile.displayName ?? "",
+            vocalGoal: nextProfile.vocalGoal ?? ""
+          });
+
+          if (nextProfile.onboardingCompleted) {
+            setIsProfileModalOpen(false);
+          }
+
+          return nextProfile;
+        });
+        setIsProfileGateReady(true);
+      } catch {
+        localStorage.removeItem(PROFILE_STORAGE_KEY);
+        setIsProfileModalOpen(!initialProfile.onboardingCompleted);
+        setIsProfileGateReady(true);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [initialProfile.onboardingCompleted, userEmail, userId]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const storedPreferences = localStorage.getItem(markerPreferencesKey(userId));
+      if (!storedPreferences) {
+        return;
+      }
+
+      try {
+        const parsedPreferences = JSON.parse(storedPreferences) as Partial<MarkerPreferences>;
+        const nextHiddenIds = new Set(parsedPreferences.hiddenSystemMarkerIds ?? []);
+        const nextOverrides = parsedPreferences.systemOverrides ?? {};
+
+        setHiddenSystemMarkerIds(nextHiddenIds);
+        setSystemMarkerOverrides(nextOverrides);
+        setMarkers((currentMarkers) =>
+          currentMarkers.map((marker) => {
+            const override = nextOverrides[marker.id];
+            return marker.isSystem && override ? { ...marker, ...override } : marker;
+          })
+        );
+      } catch {
+        localStorage.removeItem(markerPreferencesKey(userId));
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [userId]);
+
   const effectiveActiveSongId = activeSongId ?? songs[0]?.id ?? null;
   const activeSong = useMemo(() => songs.find((song) => song.id === effectiveActiveSongId), [effectiveActiveSongId, songs]);
   const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
+  const visibleMarkers = useMemo(() => markers.filter((marker) => !marker.isSystem || !hiddenSystemMarkerIds.has(marker.id)), [hiddenSystemMarkerIds, markers]);
+  const selectedMarker = useMemo(() => visibleMarkers.find((marker) => marker.id === selectedMarkerId) ?? null, [selectedMarkerId, visibleMarkers]);
   const selectedData = useMemo(() => findSelectedData(activeSong, selection, common("emptyLine")), [activeSong, common, selection]);
   const selectedWordIds = useMemo(() => new Set(activeSong ? selectedWordAddresses(activeSong, selection).map((address) => address.word.id) : []), [activeSong, selection]);
   const selectedLineId = selection?.type === "line" ? selection.lineId : null;
@@ -772,6 +930,92 @@ export function VocalMapApp({
     setEditingSongId(song.id);
     setDraft(songToDraft(song));
     setSelection(null);
+  }
+
+  function persistMarkerPreferences(nextHiddenIds: Set<string>, nextOverrides: Record<string, MarkerDraft>) {
+    const preferences: MarkerPreferences = {
+      hiddenSystemMarkerIds: Array.from(nextHiddenIds),
+      systemOverrides: nextOverrides
+    };
+    localStorage.setItem(markerPreferencesKey(userId), JSON.stringify(preferences));
+  }
+
+  function openMarkerCreate() {
+    setIsMarkerPanelOpen(true);
+    setEditingMarkerId(null);
+    setSelectedMarkerId(null);
+    setCustomMarkerDraft(EMPTY_CUSTOM_MARKER);
+    setIsMarkerFormOpen(true);
+  }
+
+  function openMarkerEdit(marker: Marker) {
+    setIsMarkerPanelOpen(true);
+    setSelectedMarkerId(marker.id);
+    setEditingMarkerId(marker.id);
+    setCustomMarkerDraft({
+      label: marker.label,
+      meaning: marker.meaning,
+      color: marker.color,
+      icon: marker.icon
+    });
+    setIsMarkerFormOpen(true);
+  }
+
+  function closeMarkerForm() {
+    setEditingMarkerId(null);
+    setIsMarkerFormOpen(false);
+    setCustomMarkerDraft(EMPTY_CUSTOM_MARKER);
+  }
+
+  async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const displayName = profileDraft.displayName.trim();
+    const vocalGoal = profileDraft.vocalGoal.trim();
+
+    if (displayName.length < 2) {
+      setProfileError(t("profileNameRequired"));
+      return;
+    }
+
+    setIsSavingProfile(true);
+    setProfileError("");
+
+    const nextProfile: UserProfile = {
+      id: userId,
+      email: userEmail || null,
+      displayName,
+      vocalGoal: vocalGoal || null,
+      onboardingCompleted: true
+    };
+    const profileRow: TablesInsert<"profiles"> = {
+      id: userId,
+      email: userEmail || null,
+      display_name: displayName,
+      vocal_goal: vocalGoal || null,
+      onboarding_completed: true
+    };
+
+    const { error } = await supabase.from("profiles").upsert(profileRow, { onConflict: "id" });
+
+    if (error) {
+      const legacyProfileRow: TablesInsert<"profiles"> = {
+        id: userId,
+        email: userEmail || null,
+        display_name: displayName
+      };
+      const { error: legacyError } = await supabase.from("profiles").upsert(legacyProfileRow, { onConflict: "id" });
+
+      if (legacyError) {
+        setProfileError(t("profileSaveFailed"));
+        setIsSavingProfile(false);
+        return;
+      }
+    }
+
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(nextProfile));
+    setProfile(nextProfile);
+    setIsSavingProfile(false);
+    setIsProfileModalOpen(false);
   }
 
   async function persistSong(song: Song, existingSong?: Song) {
@@ -900,7 +1144,7 @@ export function VocalMapApp({
     setStatusMessage(t("songDeleted"));
   }
 
-  async function addCustomMarker(event: React.FormEvent<HTMLFormElement>) {
+  async function saveMarker(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const label = customMarkerDraft.label.trim();
     const meaning = customMarkerDraft.meaning.trim();
@@ -910,12 +1154,56 @@ export function VocalMapApp({
       return;
     }
 
-    const marker: Marker = {
-      id: `custom-${createId()}`,
+    const existingMarker = editingMarkerId ? markers.find((item) => item.id === editingMarkerId) : undefined;
+    const markerPayload = {
       label: label.slice(0, 14),
       meaning: meaning || t("customMarkerDefaultMeaning"),
       color: customMarkerDraft.color,
-      icon: customMarkerDraft.icon,
+      icon: customMarkerDraft.icon
+    };
+
+    if (existingMarker?.isSystem) {
+      const nextOverrides = {
+        ...systemMarkerOverrides,
+        [existingMarker.id]: markerPayload
+      };
+
+      setSystemMarkerOverrides(nextOverrides);
+      persistMarkerPreferences(hiddenSystemMarkerIds, nextOverrides);
+      setMarkers((currentMarkers) => currentMarkers.map((marker) => (marker.id === existingMarker.id ? { ...marker, ...markerPayload } : marker)));
+      setSelectedMarkerId(existingMarker.id);
+      closeMarkerForm();
+      setStatusMessage(t("markerUpdated"));
+      return;
+    }
+
+    if (existingMarker) {
+      const { error } = await supabase
+        .from("markers")
+        .update({
+          label: markerPayload.label,
+          meaning: markerPayload.meaning,
+          color: markerPayload.color,
+          icon: markerPayload.icon
+        })
+        .eq("id", existingMarker.id)
+        .eq("user_id", userId);
+
+      if (error) {
+        setStatusMessage(t("saveFailed"));
+        return;
+      }
+
+      setMarkers((currentMarkers) => currentMarkers.map((marker) => (marker.id === existingMarker.id ? { ...marker, ...markerPayload } : marker)));
+      setSelectedMarkerId(existingMarker.id);
+      closeMarkerForm();
+      setStatusMessage(t("markerUpdated"));
+      return;
+    }
+
+    const marker: Marker = {
+      id: `custom-${createId()}`,
+      ...markerPayload,
       isSystem: false
     };
 
@@ -936,18 +1224,34 @@ export function VocalMapApp({
     }
 
     setMarkers((currentMarkers) => [...currentMarkers, marker]);
-    setCustomMarkerDraft({ ...EMPTY_CUSTOM_MARKER, color: customMarkerDraft.color });
+    setSelectedMarkerId(marker.id);
+    closeMarkerForm();
     setStatusMessage(t("markerAdded"));
   }
 
-  async function removeCustomMarker(markerId: string) {
+  async function removeMarker(markerId: string) {
     const marker = markers.find((item) => item.id === markerId);
-    if (!marker || marker.isSystem) {
+    if (!marker) {
       return;
     }
 
-    const confirmed = window.confirm(t("confirmDeleteMarker", { label: marker.label }));
+    const confirmed = window.confirm(t(marker.isSystem ? "confirmHideSystemMarker" : "confirmDeleteMarker", { label: marker.label }));
     if (!confirmed) {
+      return;
+    }
+
+    if (marker.isSystem) {
+      const nextHiddenIds = new Set(hiddenSystemMarkerIds);
+      nextHiddenIds.add(marker.id);
+      setHiddenSystemMarkerIds(nextHiddenIds);
+      persistMarkerPreferences(nextHiddenIds, systemMarkerOverrides);
+
+      if (editingMarkerId === marker.id) {
+        closeMarkerForm();
+      }
+
+      setSelectedMarkerId(null);
+      setStatusMessage(t("markerHidden"));
       return;
     }
 
@@ -958,6 +1262,7 @@ export function VocalMapApp({
     }
 
     setMarkers((currentMarkers) => currentMarkers.filter((item) => item.id !== markerId));
+    setSelectedMarkerId(null);
     setSongs((currentSongs) =>
       currentSongs.map((song) => ({
         ...song,
@@ -973,6 +1278,24 @@ export function VocalMapApp({
       }))
     );
     setStatusMessage(t("markerDeleted"));
+  }
+
+  function resetSystemMarkers() {
+    const nextHiddenIds = new Set<string>();
+    const nextOverrides: Record<string, MarkerDraft> = {};
+
+    setHiddenSystemMarkerIds(nextHiddenIds);
+    setSystemMarkerOverrides(nextOverrides);
+    localStorage.removeItem(markerPreferencesKey(userId));
+    setSelectedMarkerId(null);
+    setMarkers((currentMarkers) =>
+      currentMarkers.map((marker) => {
+        const initialMarker = translatedInitialMarkers.find((item) => item.id === marker.id);
+        return marker.isSystem && initialMarker ? initialMarker : marker;
+      })
+    );
+    closeMarkerForm();
+    setStatusMessage(t("markerDefaultsReset"));
   }
 
   async function searchSpotify() {
@@ -1010,7 +1333,8 @@ export function VocalMapApp({
           return;
         }
 
-        setSpotifyMessage(data.error ?? t("spotifySearchFailed"));
+        const errorCode = data.errorCode as SpotifySearchErrorCode | undefined;
+        setSpotifyMessage(t(errorCode ? spotifySearchErrorMessageKeys[errorCode] ?? "spotifySearchFailed" : "spotifySearchFailed"));
         return;
       }
 
@@ -1585,14 +1909,20 @@ export function VocalMapApp({
         top: `min(${selection.y + 12}px, calc(100vh - 390px))`
       } as CSSProperties)
     : undefined;
+  const profileDisplayName = profile.displayName?.trim() || userEmail || t("profileFallbackName");
+  const profileMeta = profile.vocalGoal?.trim() || t("profileFallbackMeta");
 
   return (
-    <div className="grid min-h-dvh grid-cols-1 bg-stone-100 lg:grid-cols-[22rem_minmax(0,1fr)]">
-      <aside className="flex min-h-0 flex-col gap-4 border-b border-stone-200 bg-white p-4 lg:min-h-dvh lg:border-b-0 lg:border-r">
+    <div
+      className="relative grid h-dvh grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden bg-[#87f0dc] bg-cover bg-center p-3 md:grid-cols-[20rem_minmax(0,1fr)] md:grid-rows-1"
+      style={{ backgroundImage: "url('/images/auth-green-bg.png')" }}
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(220,255,246,0.18),rgba(35,181,156,0.12)_46%,rgba(12,130,111,0.24)_100%)]" />
+      <aside className="relative z-10 flex max-h-[42dvh] min-h-0 flex-col gap-4 overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-4 shadow-[0_28px_80px_rgba(0,104,83,0.20)] backdrop-blur-md md:h-full md:max-h-none">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="grid size-10 flex-none place-items-center rounded-lg bg-stone-950 text-white">
-              <Music2 size={19} />
+            <div className="grid size-10 flex-none place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.24)]">
+              <AudioLines size={19} strokeWidth={2.5} />
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-stone-950">{common("appName")}</p>
@@ -1604,10 +1934,6 @@ export function VocalMapApp({
               <LogOut size={16} />
             </button>
           </form>
-        </div>
-
-        <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600">
-          <span className="font-semibold text-stone-800">{userEmail}</span>
         </div>
 
         {hasLocalData ? (
@@ -1626,115 +1952,205 @@ export function VocalMapApp({
           {t("newSong")}
         </button>
 
-        <section className="grid gap-3 border-t border-stone-200 pt-4">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
-            <Search size={14} />
-            {t("musicSearchTitle")}
-          </div>
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void searchSpotify();
-            }}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <section className="grid gap-3 border-t border-emerald-100 pt-3">
+          <button
+            className="flex min-h-11 items-center justify-between gap-3 rounded-2xl px-1 text-left transition hover:bg-emerald-50/70"
+            type="button"
+            onClick={() => setIsSongSearchOpen((isOpen) => !isOpen)}
+            aria-expanded={isSongSearchOpen}
           >
-            <input className={inputClass} value={spotifyQuery} onChange={(event) => setSpotifyQuery(event.target.value)} placeholder={t("musicSearchPlaceholder")} />
-            <button className={iconButtonClass} type="submit" disabled={isSearchingSpotify} title={common("search")}>
-              {isSearchingSpotify ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-            </button>
-          </form>
-          {spotifyMessage ? <p className="text-sm leading-5 text-stone-600">{spotifyMessage}</p> : null}
-          <div className="grid max-h-56 gap-1 overflow-auto pr-1">
-            {spotifyResults.map((track) => (
-              <button
-                className="grid grid-cols-[2.375rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-transparent p-2 text-left transition hover:border-stone-200 hover:bg-stone-50"
-                type="button"
-                key={track.id}
-                onClick={() => void importSpotifyTrack(track)}
+            <span className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase text-stone-500">
+              <Search size={14} />
+              <span className="truncate">{t("musicSearchTitle")}</span>
+            </span>
+            <span className="inline-flex flex-none items-center gap-2 text-xs font-bold text-emerald-700">
+              {spotifyResults.length > 0 ? t("searchResultsCount", { count: spotifyResults.length }) : t("searchClosedLabel")}
+              <ChevronDown className={`size-4 transition ${isSongSearchOpen ? "rotate-180" : ""}`} />
+            </span>
+          </button>
+          {isSongSearchOpen ? (
+            <>
+              <form
+                className="flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void searchSpotify();
+                }}
               >
-                {track.albumArtUrl ? (
-                  <Image className="rounded object-cover" src={track.albumArtUrl} alt={t("coverAlt", { title: track.title })} width={38} height={38} />
-                ) : (
-                  <div className="grid size-[38px] place-items-center rounded bg-stone-100 text-stone-400">
-                    <Music2 size={15} />
-                  </div>
-                )}
-                <span className="min-w-0">
-                  <strong className="block truncate text-sm font-semibold text-stone-950">{track.title}</strong>
-                  <small className="block truncate text-xs text-stone-500">
-                    {track.artist} · {formatDuration(track.durationMs)}
-                    {track.source === "lrclib" ? " · LRCLIB" : ""}
-                  </small>
-                </span>
-                {importingTrackId === track.id ? <Loader2 className="spin size-4" /> : <Plus size={15} />}
-              </button>
-            ))}
-          </div>
+                <input className={inputClass} value={spotifyQuery} onChange={(event) => setSpotifyQuery(event.target.value)} placeholder={t("musicSearchPlaceholder")} />
+                <button className={iconButtonClass} type="submit" disabled={isSearchingSpotify} title={common("search")}>
+                  {isSearchingSpotify ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
+                </button>
+              </form>
+              {spotifyMessage ? <p className="text-sm leading-5 text-stone-600">{spotifyMessage}</p> : null}
+              <div className="grid max-h-56 gap-1 overflow-auto pr-1">
+                {spotifyResults.map((track) => (
+                  <button
+                    className="grid grid-cols-[2.375rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-transparent p-2 text-left transition hover:border-stone-200 hover:bg-stone-50"
+                    type="button"
+                    key={track.id}
+                    onClick={() => void importSpotifyTrack(track)}
+                  >
+                    {track.albumArtUrl ? (
+                      <Image className="rounded object-cover" src={track.albumArtUrl} alt={t("coverAlt", { title: track.title })} width={38} height={38} />
+                    ) : (
+                      <div className="grid size-[38px] place-items-center rounded bg-stone-100 text-stone-400">
+                        <Music2 size={15} />
+                      </div>
+                    )}
+                    <span className="min-w-0">
+                      <strong className="block truncate text-sm font-semibold text-stone-950">{track.title}</strong>
+                      <small className="block truncate text-xs text-stone-500">
+                        {track.artist} · {formatDuration(track.durationMs)}
+                        {track.source === "lrclib" ? " · LRCLIB" : ""}
+                      </small>
+                    </span>
+                    {importingTrackId === track.id ? <Loader2 className="spin size-4" /> : <Plus size={15} />}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </section>
 
-        <section className="grid gap-3 border-t border-stone-200 pt-4">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
-            <Sparkles size={14} />
-            {t("markerPanelTitle")}
+        <section className="grid gap-3 border-t border-emerald-100 pt-3">
+          <button
+            className="flex min-h-11 items-center justify-between gap-3 rounded-2xl px-1 text-left transition hover:bg-emerald-50/70"
+            type="button"
+            onClick={() => {
+              setIsMarkerPanelOpen((isOpen) => !isOpen);
+              setIsMarkerFormOpen(false);
+              setEditingMarkerId(null);
+              setSelectedMarkerId(null);
+            }}
+            aria-expanded={isMarkerPanelOpen}
+          >
+            <span className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase text-stone-500">
+              <Sparkles size={14} />
+              <span className="truncate">{t("markerPanelTitle")}</span>
+            </span>
+            <span className="inline-flex flex-none items-center gap-2 text-xs font-bold text-emerald-700">
+              {t("markerCount", { count: visibleMarkers.length })}
+              <ChevronDown className={`size-4 transition ${isMarkerPanelOpen ? "rotate-180" : ""}`} />
+            </span>
+          </button>
+          {isMarkerPanelOpen ? (
+            <>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs leading-5 text-stone-500">{t("markerPanelHint")}</p>
+            <button
+              className="inline-flex h-8 flex-none items-center justify-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"
+              type="button"
+              onClick={openMarkerCreate}
+            >
+              <Plus size={13} />
+              {t("markerAddAction")}
+            </button>
           </div>
-          <div className="flex max-h-28 flex-wrap gap-1.5 overflow-auto pr-1">
-            {markers.map((marker) => {
+          <div className="flex max-h-36 flex-wrap gap-1.5 overflow-auto pr-1">
+            {visibleMarkers.map((marker) => {
               const Icon = markerIcons[marker.icon];
+              const isSelected = selectedMarkerId === marker.id;
               return (
-                <span
-                  className="inline-flex h-7 max-w-36 items-center gap-1.5 rounded-full border px-2 text-xs font-bold"
+                <button
+                  className={`inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs font-bold transition hover:shadow-sm ${
+                    isSelected ? "ring-2 ring-emerald-300 ring-offset-1 ring-offset-white" : ""
+                  }`}
+                  type="button"
                   key={marker.id}
                   style={makeMarkerStyle(marker)}
+                  onClick={() => {
+                    setSelectedMarkerId((currentId) => (currentId === marker.id ? null : marker.id));
+                    setIsMarkerFormOpen(false);
+                    setEditingMarkerId(null);
+                  }}
                   title={marker.meaning}
+                  aria-pressed={isSelected}
                 >
                   <Icon size={12} strokeWidth={2.4} />
                   <span className="truncate">{marker.label}</span>
-                  {!marker.isSystem ? (
-                    <button className="grid size-4 place-items-center rounded-full hover:bg-white/60" type="button" onClick={() => void removeCustomMarker(marker.id)} title={t("deleteMarkerTitle")}>
-                      <X size={10} />
-                    </button>
-                  ) : null}
-                </span>
+                </button>
               );
             })}
           </div>
-          <form className="grid gap-2" onSubmit={(event) => void addCustomMarker(event)}>
-            <input className={inputClass} value={customMarkerDraft.label} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, label: event.target.value }))} placeholder={t("markerNamePlaceholder")} maxLength={14} />
-            <input className={inputClass} value={customMarkerDraft.meaning} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, meaning: event.target.value }))} placeholder={t("markerMeaningPlaceholder")} />
-            <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] gap-2">
-              <input
-                className="h-10 min-w-0 rounded-md border border-stone-200 bg-white p-1"
-                type="color"
-                value={customMarkerDraft.color}
-                onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, color: event.target.value }))}
-                title={t("markerColorTitle")}
-              />
-              <select className={inputClass} value={customMarkerDraft.icon} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, icon: event.target.value as MarkerIconName }))}>
-                {MARKER_ICON_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {markerIconLabels(option.value)}
-                  </option>
-                ))}
-              </select>
-              <button className={secondaryButtonClass} type="submit">
-                <Plus size={14} />
-                {common("add")}
-              </button>
+          {selectedMarker && !isMarkerFormOpen ? (
+            <div className="grid gap-2 rounded-2xl border border-emerald-100 bg-white/75 p-2.5">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="size-3 flex-none rounded-full" style={{ backgroundColor: selectedMarker.color }} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-stone-950">{selectedMarker.label}</p>
+                  <p className="truncate text-xs leading-5 text-stone-500">{selectedMarker.meaning}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="button" onClick={() => openMarkerEdit(selectedMarker)}>
+                  <Pencil size={13} />
+                  {common("edit")}
+                </button>
+                <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs text-red-700 hover:border-red-200 hover:bg-red-50`} type="button" onClick={() => void removeMarker(selectedMarker.id)}>
+                  <Trash2 size={13} />
+                  {selectedMarker.isSystem ? t("markerHide") : common("delete")}
+                </button>
+              </div>
             </div>
-          </form>
+          ) : null}
+          {hiddenSystemMarkerIds.size > 0 || Object.keys(systemMarkerOverrides).length > 0 ? (
+            <button className="justify-self-start text-xs font-semibold text-emerald-700 transition hover:text-emerald-900" type="button" onClick={resetSystemMarkers}>
+              {t("markerResetDefaults")}
+            </button>
+          ) : null}
+          {isMarkerFormOpen ? (
+            <form className="grid gap-2 rounded-2xl border border-emerald-100 bg-white/80 p-3 shadow-sm" onSubmit={(event) => void saveMarker(event)}>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-bold uppercase text-stone-500">{editingMarkerId ? t("markerEditTitle") : t("markerCreateTitle")}</p>
+                <button className={`${iconButtonClass} size-7 rounded-full border-transparent`} type="button" onClick={closeMarkerForm} title={common("close")}>
+                  <X size={13} />
+                </button>
+              </div>
+              <input className={inputClass} value={customMarkerDraft.label} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, label: event.target.value }))} placeholder={t("markerNamePlaceholder")} maxLength={14} />
+              <input className={inputClass} value={customMarkerDraft.meaning} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, meaning: event.target.value }))} placeholder={t("markerMeaningPlaceholder")} />
+              <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2">
+                <input
+                  className="h-10 min-w-0 rounded-xl border border-stone-200 bg-white p-1"
+                  type="color"
+                  value={customMarkerDraft.color}
+                  onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, color: event.target.value }))}
+                  title={t("markerColorTitle")}
+                />
+                <select className={inputClass} value={customMarkerDraft.icon} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, icon: event.target.value as MarkerIconName }))}>
+                  {MARKER_ICON_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {markerIconLabels(option.value)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button className={secondaryButtonClass} type="button" onClick={closeMarkerForm}>
+                  {common("cancel")}
+                </button>
+                <button className={primaryButtonClass} type="submit">
+                  {editingMarkerId ? t("markerUpdate") : common("add")}
+                </button>
+              </div>
+            </form>
+          ) : null}
+            </>
+          ) : null}
         </section>
 
-        <section className="grid min-h-0 flex-1 gap-3 border-t border-stone-200 pt-4">
+        <section className="grid min-h-0 gap-3 border-t border-emerald-100 pt-4">
           <div className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
             <Library size={14} />
             {t("libraryTitle")}
           </div>
           <input className={inputClass} value={localSearch} onChange={(event) => setLocalSearch(event.target.value)} placeholder={t("librarySearchPlaceholder")} />
-          <div className="grid min-h-0 gap-1 overflow-auto pr-1">
+          <div className="grid max-h-56 min-h-0 gap-1 overflow-auto pr-1">
             {filteredSongs.map((song) => (
               <button
                 className={`grid grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-2 rounded-md border p-2 text-left transition ${
-                  song.id === effectiveActiveSongId ? "border-teal-200 bg-teal-50" : "border-transparent hover:border-stone-200 hover:bg-stone-50"
+                  song.id === effectiveActiveSongId ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
                 }`}
                 type="button"
                 key={song.id}
@@ -1763,11 +2179,33 @@ export function VocalMapApp({
             {filteredSongs.length === 0 ? <p className="text-sm text-stone-500">{t("emptyLibrary")}</p> : null}
           </div>
         </section>
+        </div>
+
+        <button
+          className="flex flex-none items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50"
+          type="button"
+          onClick={() => {
+            setProfileDraft({
+              displayName: profile.displayName ?? "",
+              vocalGoal: profile.vocalGoal ?? ""
+            });
+            setProfileError("");
+            setIsProfileModalOpen(true);
+          }}
+        >
+          <span className="grid size-10 flex-none place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.20)]">
+            <UserRound size={18} />
+          </span>
+          <span className="min-w-0">
+            <strong className="block truncate text-sm font-bold text-stone-950">{profileDisplayName}</strong>
+            <small className="block truncate text-xs leading-5 text-stone-500">{profileMeta}</small>
+          </span>
+        </button>
       </aside>
 
-      <section className="min-w-0 overflow-auto px-4 py-6 sm:px-6 lg:px-8">
+      <section className="relative z-10 min-h-0 min-w-0 overflow-auto px-2 py-4 sm:px-4 lg:px-5">
         {editingSongId ? (
-          <div className="mx-auto max-w-6xl rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+          <div className="mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.94] p-5 shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
             <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase text-stone-500">{editingSongId === "new" ? t("editorNew") : t("editorEdit")}</p>
@@ -1797,7 +2235,7 @@ export function VocalMapApp({
             </div>
 
             {draft.albumArtUrl || draft.spotifyUrl ? (
-              <div className="my-5 flex items-center gap-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
+              <div className="my-5 flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
                 {draft.albumArtUrl ? <Image className="rounded-md object-cover" src={draft.albumArtUrl} alt={draft.title ? t("coverAlt", { title: draft.title }) : t("importedCoverAlt")} width={54} height={54} /> : null}
                 <div className="min-w-0">
                   <p className="text-xs font-bold uppercase text-stone-500">{t("importedFromSpotify")}</p>
@@ -1806,7 +2244,7 @@ export function VocalMapApp({
                     {formatDuration(draft.durationMs)}
                   </p>
                   {draft.spotifyUrl ? (
-                    <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-teal-700" href={draft.spotifyUrl} target="_blank" rel="noreferrer">
+                    <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700" href={draft.spotifyUrl} target="_blank" rel="noreferrer">
                       {common("openInSpotify")} <ExternalLink size={13} />
                     </a>
                   ) : null}
@@ -1817,7 +2255,7 @@ export function VocalMapApp({
             <label className="mt-5 grid gap-2 text-sm font-semibold text-stone-700">
               {t("lyricsLabel")}
               <textarea
-                className="min-h-[46dvh] w-full resize-y rounded-md border border-stone-200 bg-white p-4 text-base leading-7 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-100"
+                className="min-h-[46dvh] w-full resize-y rounded-xl border border-stone-200 bg-white p-4 text-base leading-7 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
                 value={draft.lyricsText}
                 onChange={(event) => setDraft((current) => ({ ...current, lyricsText: event.target.value }))}
                 placeholder={t("lyricsPlaceholder")}
@@ -1826,12 +2264,12 @@ export function VocalMapApp({
           </div>
         ) : activeSong ? (
           <div>
-            <div className="mx-auto mb-5 flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="mx-auto mb-5 flex max-w-6xl flex-col gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.88] p-4 shadow-[0_22px_60px_rgba(0,104,83,0.14)] backdrop-blur-md sm:flex-row sm:items-start sm:justify-between">
               <div className="flex min-w-0 items-center gap-4">
                 {activeSong.albumArtUrl ? (
                   <Image className="size-16 flex-none rounded-lg object-cover" src={activeSong.albumArtUrl} alt={t("coverAlt", { title: activeSong.title })} width={64} height={64} />
                 ) : (
-                  <div className="grid size-16 flex-none place-items-center rounded-lg border border-stone-200 bg-white text-stone-400">
+                  <div className="grid size-16 flex-none place-items-center rounded-xl border border-emerald-100 bg-white text-emerald-500">
                     <Music2 size={24} />
                   </div>
                 )}
@@ -1873,7 +2311,7 @@ export function VocalMapApp({
               }}
             />
 
-            <div className="mx-auto max-w-6xl rounded-lg border border-stone-200 bg-white px-2 py-5 shadow-sm sm:px-4 sm:py-8">
+            <div className="mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.94] px-2 py-5 shadow-[0_28px_80px_rgba(0,104,83,0.16)] backdrop-blur-md sm:px-4 sm:py-8">
               {activeSong.lyrics.length === 0 || activeSong.lyrics.every((line) => line.text.trim().length === 0) ? (
                 <div className="grid min-h-72 place-items-center content-center gap-3 text-center text-stone-500">
                   <FileText size={24} />
@@ -1906,16 +2344,18 @@ export function VocalMapApp({
             </div>
           </div>
         ) : (
-          <div className="mx-auto grid min-h-[calc(100dvh-5rem)] max-w-xl place-items-center content-center gap-4 text-center">
-            <div className="grid size-12 place-items-center rounded-lg bg-stone-950 text-white">
-              <Music2 size={22} />
+          <div className="mx-auto grid h-full min-h-[24rem] max-w-lg place-items-center content-center">
+            <div className="grid w-full justify-items-center gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-8 text-center shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
+              <div className="grid size-12 place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.24)]">
+                <AudioLines size={22} strokeWidth={2.5} />
+              </div>
+              <h1 className="text-2xl font-bold text-stone-950 sm:text-3xl">{t("emptyWorkspaceTitle")}</h1>
+              <p className="max-w-md text-sm leading-6 text-stone-600 sm:text-base sm:leading-7">{t("emptyWorkspaceBody")}</p>
+              <button className={`${primaryButtonClass} min-w-36`} type="button" onClick={openManualDraft}>
+                <Plus size={16} />
+                {t("newSong")}
+              </button>
             </div>
-            <h1 className="text-3xl font-bold text-stone-950">{t("emptyWorkspaceTitle")}</h1>
-            <p className="text-base leading-7 text-stone-600">{t("emptyWorkspaceBody")}</p>
-            <button className={primaryButtonClass} type="button" onClick={openManualDraft}>
-              <Plus size={16} />
-              {t("newSong")}
-            </button>
           </div>
         )}
       </section>
@@ -1936,7 +2376,7 @@ export function VocalMapApp({
           </div>
 
           <div className="grid max-h-56 grid-cols-2 gap-1.5 overflow-auto pr-1 sm:grid-cols-4">
-            {markers.map((marker) => {
+            {visibleMarkers.map((marker) => {
               const Icon = markerIcons[marker.icon];
               const active = selectedData.annotations.some((annotation) => annotation.markerId === marker.id);
 
@@ -1984,6 +2424,60 @@ export function VocalMapApp({
               ) : null}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {isProfileGateReady && isProfileModalOpen ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-emerald-950/35 px-4 backdrop-blur-sm">
+          <form
+            className="relative grid w-full max-w-md gap-5 rounded-[1.5rem] border border-white/80 bg-white p-6 text-center shadow-[0_28px_90px_rgba(0,80,68,0.28)]"
+            onSubmit={(event) => void saveProfile(event)}
+          >
+            {profile.onboardingCompleted ? (
+              <button className={`${iconButtonClass} absolute right-4 top-4 size-9`} type="button" onClick={() => setIsProfileModalOpen(false)} title={common("close")}>
+                <X size={15} />
+              </button>
+            ) : null}
+
+            <div className="mx-auto grid size-12 place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.24)]">
+              <UserRound size={22} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold leading-tight text-stone-950">{t("profileTitle")}</h2>
+              <p className="mt-2 text-sm leading-6 text-stone-500">{t("profileSubtitle")}</p>
+            </div>
+
+            <div className="grid gap-3 text-left">
+              <label className="grid gap-2 text-sm font-semibold text-stone-700">
+                {t("profileNickname")}
+                <input
+                  className={inputClass}
+                  value={profileDraft.displayName}
+                  onChange={(event) => setProfileDraft((current) => ({ ...current, displayName: event.target.value }))}
+                  placeholder={t("profileNicknamePlaceholder")}
+                  maxLength={40}
+                  autoFocus
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-stone-700">
+                {t("profileGoal")}
+                <textarea
+                  className="min-h-24 w-full resize-none rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm leading-6 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                  value={profileDraft.vocalGoal}
+                  onChange={(event) => setProfileDraft((current) => ({ ...current, vocalGoal: event.target.value }))}
+                  placeholder={t("profileGoalPlaceholder")}
+                  maxLength={160}
+                />
+              </label>
+            </div>
+
+            {profileError ? <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{profileError}</p> : null}
+
+            <button className={`${primaryButtonClass} w-full`} type="submit" disabled={isSavingProfile}>
+              {isSavingProfile ? <Loader2 className="spin size-4" /> : null}
+              {isSavingProfile ? t("profileSaving") : t("profileSave")}
+            </button>
+          </form>
         </div>
       ) : null}
 

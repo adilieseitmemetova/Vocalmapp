@@ -65,11 +65,15 @@
     "newSong": "New song",
     "musicSearchTitle": "Find a song",
     "musicSearchPlaceholder": "SZA, Billie Eilish, Måneskin...",
+    "searchClosedLabel": "Search",
+    "searchResultsCount": "{count, plural, one {# result} other {# results}}",
+    "spotifyAuthRequired": "Sign in to search Spotify.",
     "spotifyMissing": "Spotify is not configured. Showing LRCLIB results without album art.",
     "spotifyUnavailable": "Spotify is unavailable. Showing LRCLIB results.",
     "spotifySearchUnavailable": "Search is unavailable. You can add a song manually.",
     "spotifyNoResults": "No songs found. Try adding an artist name.",
     "spotifySearchFailed": "Spotify search failed.",
+    "spotifyQueryTooLong": "Search query is too long.",
     "spotifyMissingCredentials": "Spotify is not configured. Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET to the server environment.",
     "queryRequired": "Enter a song title or artist.",
     "openLyricsFromLrclib": "Opening lyrics from LRCLIB...",
@@ -79,14 +83,28 @@
     "lyricsNotFound": "Lyrics were not found. Paste lyrics manually.",
     "lyricsFetchFailed": "Lyrics could not be loaded. Paste lyrics manually.",
     "markerPanelTitle": "Vocal markers",
+    "markerCount": "{count, plural, one {# marker} other {# markers}}",
+    "markerPanelHint": "Choose a marker to edit or hide it.",
     "markerNamePlaceholder": "New marker",
     "markerMeaningPlaceholder": "Meaning",
     "markerColorTitle": "Marker color",
     "deleteMarkerTitle": "Delete marker",
+    "hideMarkerTitle": "Hide {label}",
+    "editMarkerTitle": "Edit {label}",
+    "markerAddAction": "Add marker",
+    "markerCreateTitle": "New marker",
+    "markerEditTitle": "Edit marker",
+    "markerUpdate": "Update",
+    "markerHide": "Hide",
+    "markerResetDefaults": "Reset default markers",
     "markerNameRequired": "Add a short marker label.",
     "markerAdded": "Marker added.",
+    "markerUpdated": "Marker updated.",
+    "markerHidden": "Default marker hidden.",
+    "markerDefaultsReset": "Default markers reset.",
     "markerDeleted": "Marker deleted.",
     "confirmDeleteMarker": "Delete \"{label}\" and remove it from songs?",
+    "confirmHideSystemMarker": "Hide default marker \"{label}\" from your marker list?",
     "libraryTitle": "My songs",
     "librarySearchPlaceholder": "Search your library",
     "emptyLibrary": "No songs yet.",
@@ -133,6 +151,104 @@
     "songListMeta": "{artist} · {count, plural, one {# marker} other {# markers}}",
     "coverAlt": "{title} cover art",
     "importedCoverAlt": "Imported song cover art",
+    "profileFallbackName": "Profile",
+    "profileFallbackMeta": "Complete your profile",
+    "profileTitle": "Set up your profile",
+    "profileSubtitle": "Choose a nickname and add a short vocal focus.",
+    "profileNickname": "Nickname",
+    "profileNicknamePlaceholder": "Adi",
+    "profileGoal": "Vocal focus",
+    "profileGoalPlaceholder": "Breath control, riffs, audition prep...",
+    "profileNameRequired": "Add a nickname with at least 2 characters.",
+    "profileSaveFailed": "Profile could not be saved. Try again.",
+    "profileSave": "Save profile",
+    "profileSaving": "Saving profile",
+    "systemMarkers": {
+      "up": {
+        "label": "Up",
+        "meaning": "Pitch rises"
+      },
+      "down": {
+        "label": "Down",
+        "meaning": "Pitch falls"
+      },
+      "vib": {
+        "label": "Vib",
+        "meaning": "Vibrato"
+      },
+      "hold": {
+        "label": "Hold",
+        "meaning": "Sustain the sound"
+      },
+      "breath": {
+        "label": "Breath",
+        "meaning": "Take a breath"
+      },
+      "accent": {
+        "label": "Accent",
+        "meaning": "Emphasize this sound"
+      },
+      "soft": {
+        "label": "Soft",
+        "meaning": "Sing gently"
+      },
+      "strong": {
+        "label": "Strong",
+        "meaning": "Add strength"
+      },
+      "slide-up": {
+        "label": "Slide up",
+        "meaning": "Slide upward"
+      },
+      "slide-down": {
+        "label": "Slide down",
+        "meaning": "Slide downward"
+      },
+      "legato": {
+        "label": "Legato",
+        "meaning": "Connect smoothly without a break"
+      },
+      "pause": {
+        "label": "Pause",
+        "meaning": "Pause or slow down"
+      },
+      "cut": {
+        "label": "Cut",
+        "meaning": "Release the sound quickly"
+      },
+      "run": {
+        "label": "Run",
+        "meaning": "Melisma or vocal run"
+      },
+      "mix": {
+        "label": "Mix",
+        "meaning": "Mixed voice"
+      },
+      "head": {
+        "label": "Head",
+        "meaning": "Head voice"
+      },
+      "chest": {
+        "label": "Chest",
+        "meaning": "Chest voice"
+      },
+      "falsetto": {
+        "label": "Falsetto",
+        "meaning": "Falsetto"
+      },
+      "twang": {
+        "label": "Twang",
+        "meaning": "Bright twang tone"
+      },
+      "cry": {
+        "label": "Cry",
+        "meaning": "Crying tone"
+      },
+      "mute": {
+        "label": "Mute",
+        "meaning": "Sing quieter or remove extra sound"
+      }
+    },
     "customMarkerDefaultMeaning": "Custom vocal marker"
   },
   "markerIcons": {

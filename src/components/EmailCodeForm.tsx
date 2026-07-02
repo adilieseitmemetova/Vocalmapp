@@ -182,59 +182,61 @@ export function EmailCodeForm() {
 
   return (
     <div className="mt-6 grid gap-4">
-      <button
-        className="relative inline-flex h-11 items-center justify-center rounded-full border border-stone-200 bg-white px-12 text-sm font-semibold text-stone-700 transition hover:bg-stone-50 active:scale-[0.99] disabled:opacity-60"
-        type="button"
-        onClick={handleGoogleSignIn}
-        disabled={isRedirecting}
-      >
-        {isRedirecting ? (
-          <Loader2 className="spin absolute left-5 size-4" />
-        ) : (
-          <Image
-            className="absolute left-5 size-5 object-contain"
-            src="/images/google-g-logo.png"
-            alt=""
-            width={20}
-            height={20}
-            aria-hidden="true"
-          />
-        )}
-        {isRedirecting ? t("googleRedirecting") : t("googleSubmit")}
-      </button>
-
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 text-[0.7rem] font-semibold text-stone-400">
-        <span className="h-px bg-stone-200" />
-        <span>{t("orDivider")}</span>
-        <span className="h-px bg-stone-200" />
-      </div>
-
       {step === "email" ? (
-        <form className="grid gap-4 text-center" onSubmit={handleEmailSubmit}>
-          <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="email">
-            <span className="sr-only">{t("emailLabel")}</span>
-            <input
-              className="h-11 rounded-md border border-stone-200 bg-white px-4 text-sm font-medium text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder={t("emailPlaceholder")}
-              required
-            />
-          </label>
+        <>
           <button
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(5,150,105,0.28)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
-            type="submit"
-            disabled={isSending}
+            className="relative inline-flex h-11 items-center justify-center rounded-full border border-stone-200 bg-white px-12 text-sm font-semibold text-stone-700 transition hover:bg-stone-50 active:scale-[0.99] disabled:opacity-60"
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={isRedirecting}
           >
-            {isSending ? <Loader2 className="spin size-4" /> : <Mail size={16} />}
-            {isSending ? t("codeSending") : t("codeSubmit")}
+            {isRedirecting ? (
+              <Loader2 className="spin absolute left-5 size-4" />
+            ) : (
+              <Image
+                className="absolute left-5 size-5 object-contain"
+                src="/images/google-g-logo.png"
+                alt=""
+                width={20}
+                height={20}
+                aria-hidden="true"
+              />
+            )}
+            {isRedirecting ? t("googleRedirecting") : t("googleSubmit")}
           </button>
-          <p className="mx-auto max-w-xs text-xs leading-5 text-stone-500">{t("continueNote")}</p>
-        </form>
+
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 text-[0.7rem] font-semibold text-stone-400">
+            <span className="h-px bg-stone-200" />
+            <span>{t("orDivider")}</span>
+            <span className="h-px bg-stone-200" />
+          </div>
+
+          <form className="grid gap-4 text-center" onSubmit={handleEmailSubmit}>
+            <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="email">
+              <span className="sr-only">{t("emailLabel")}</span>
+              <input
+                className="h-11 rounded-md border border-stone-200 bg-white px-4 text-sm font-medium text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder={t("emailPlaceholder")}
+                required
+              />
+            </label>
+            <button
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(5,150,105,0.28)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+              type="submit"
+              disabled={isSending}
+            >
+              {isSending ? <Loader2 className="spin size-4" /> : <Mail size={16} />}
+              {isSending ? t("codeSending") : t("codeSubmit")}
+            </button>
+            <p className="mx-auto max-w-xs text-xs leading-5 text-stone-500">{t("continueNote")}</p>
+          </form>
+        </>
       ) : (
         <form className="grid gap-4 text-center" onSubmit={handleCodeSubmit}>
           <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="otp-code">
@@ -284,8 +286,7 @@ export function EmailCodeForm() {
             {isVerifying ? <Loader2 className="spin size-4" /> : <Check size={16} />}
             {isVerifying ? t("codeVerifying") : t("codeVerify")}
           </button>
-          <p className="mx-auto max-w-xs text-xs leading-5 text-stone-500">{t("continueNote")}</p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2">
             <button
               className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-800 transition hover:bg-stone-50 disabled:opacity-60"
               type="button"
@@ -308,7 +309,7 @@ export function EmailCodeForm() {
 
       {message ? (
         <div
-          className={`rounded-xl border px-4 py-3 text-sm leading-6 ${
+          className={`rounded-lg border px-3 py-2 text-xs leading-5 ${
             status === "sent" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-800"
           }`}
           role="status"

@@ -83,6 +83,14 @@ export type InitialVocalMapData = {
   markers: Marker[];
 };
 
+export type UserProfile = {
+  id: string;
+  email?: string | null;
+  displayName?: string | null;
+  vocalGoal?: string | null;
+  onboardingCompleted: boolean;
+};
+
 export type SpotifyTrackResult = {
   id: string;
   title: string;

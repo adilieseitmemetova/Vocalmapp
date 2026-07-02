@@ -3,7 +3,7 @@
 import { Check, Loader2, Mail, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
 
 import { createClient } from "@/lib/supabase/client";
@@ -12,10 +12,19 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const codeBoxCount = 6;
 const codePattern = /^\d{6}$/;
 const maxCodeLength = codeBoxCount;
+const authNextStorageKey = "vocalmapp:auth-next";
 
 type AuthStep = "email" | "code";
 type AuthStatus = "idle" | "sending" | "sent" | "verifying" | "redirecting" | "error";
 type EmailCodeErrorMessageKey = "codeRateLimitError" | "codeUnauthorizedEmailError" | "codeSmtpError" | "codeSendError";
+
+function safeNextPath(value: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/dashboard";
+  }
+
+  return value;
+}
 
 function getAuthErrorDetails(error: unknown) {
   const maybeError = error as { code?: string; message?: string; status?: number };
@@ -70,6 +79,7 @@ function logAuthError(operation: string, error: unknown, context?: Record<string
 export function EmailCodeForm() {
   const t = useTranslations("auth");
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const [step, setStep] = useState<AuthStep>("email");
   const [email, setEmail] = useState("");
@@ -124,11 +134,14 @@ export function EmailCodeForm() {
   async function handleGoogleSignIn() {
     setStatus("redirecting");
     setMessage("");
+    const next = safeNextPath(searchParams.get("next"));
+    sessionStorage.setItem(authNextStorageKey, next);
+    const redirectTo = `${window.location.origin}/auth/callback`;
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`
+        redirectTo
       }
     });
 

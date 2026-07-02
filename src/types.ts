@@ -14,7 +14,52 @@ export type MarkerIconName =
   | "repeat"
   | "spark"
   | "volume"
-  | "mute";
+  | "mute"
+  | "waveform"
+  | "waves"
+  | "mic"
+  | "music"
+  | "ear"
+  | "headphones"
+  | "timer"
+  | "activity"
+  | "gauge"
+  | "zap"
+  | "smile"
+  | "frown"
+  | "up-right"
+  | "down-right"
+  | "chevrons-up"
+  | "chevrons-down"
+  | "mic-vocal"
+  | "podcast"
+  | "radio"
+  | "volume-low"
+  | "volume-off"
+  | "audio-lines"
+  | "chart-up"
+  | "chart-down"
+  | "signal-high"
+  | "signal-low"
+  | "move-vertical"
+  | "arrow-up-down"
+  | "arrow-left-right"
+  | "refresh"
+  | "rotate"
+  | "undo"
+  | "redo"
+  | "corner-up-right"
+  | "corner-down-right"
+  | "spline"
+  | "blend"
+  | "layers"
+  | "brackets"
+  | "braces"
+  | "hash"
+  | "equal"
+  | "tally-1"
+  | "tally-2"
+  | "tally-3";
 
 export type Marker = {
   id: string;
@@ -31,6 +76,13 @@ export type AudioReference = {
   mimeType: string;
   durationMs?: number;
   sizeBytes?: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TextNote = {
+  id: string;
+  text: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -52,6 +104,7 @@ export type LyricWord = {
   text: string;
   annotations: WordAnnotation[];
   audioReference?: AudioReference;
+  textNote?: TextNote;
 };
 
 export type LyricLine = {
@@ -60,6 +113,7 @@ export type LyricLine = {
   words: LyricWord[];
   annotations: LineAnnotation[];
   audioReference?: AudioReference;
+  textNote?: TextNote;
 };
 
 export type Song = {
@@ -72,7 +126,7 @@ export type Song = {
   spotifyUrl?: string;
   lyrics: LyricLine[];
   sourceLyricsText: string;
-  songAudio?: AudioReference;
+  songAudios: AudioReference[];
   durationMs?: number;
   createdAt: string;
   updatedAt: string;

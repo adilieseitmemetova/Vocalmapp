@@ -1,0 +1,11 @@
+import { Suspense } from "react";
+
+import { AuthCallbackClient } from "@/components/AuthCallbackClient";
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense>
+      <AuthCallbackClient />
+    </Suspense>
+  );
+}

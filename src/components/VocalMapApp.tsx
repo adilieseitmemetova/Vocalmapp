@@ -2,7 +2,7 @@
 
 import {
   AudioLines,
-  ChevronDown,
+  Ellipsis,
   ExternalLink,
   FileText,
   Library,
@@ -14,8 +14,10 @@ import {
   Play,
   Plus,
   Search,
+  Settings2,
   Sparkles,
   Square,
+  StickyNote,
   Trash2,
   Upload,
   UserRound,
@@ -51,6 +53,7 @@ import type {
   Song,
   SongDraft,
   SpotifyTrackResult,
+  TextNote,
   UserProfile,
   WordAnnotation
 } from "@/types";
@@ -58,6 +61,7 @@ import type {
 const AUDIO_BUCKET = "vocalmap-audio";
 const PROFILE_STORAGE_KEY = "vocalmapp:profile:v1";
 const MARKER_PREFERENCES_STORAGE_PREFIX = "vocalmapp:marker-preferences";
+const TEXT_NOTES_STORAGE_PREFIX = "vocalmapp:text-notes";
 
 const EMPTY_DRAFT: SongDraft = {
   title: "",
@@ -76,6 +80,16 @@ type MarkerDraft = typeof EMPTY_CUSTOM_MARKER;
 type MarkerPreferences = {
   hiddenSystemMarkerIds: string[];
   systemOverrides: Record<string, MarkerDraft>;
+};
+type StoredTextNote = {
+  id: string;
+  songId: string;
+  lineId: string;
+  wordId: string | null;
+  targetType: "line" | "word";
+  text: string;
+  createdAt: string;
+  updatedAt: string;
 };
 type SpotifySearchErrorCode = "authRequired" | "queryRequired" | "queryTooLong" | "searchFailed" | "missingCredentials" | "unavailable";
 
@@ -122,6 +136,88 @@ const inputClass =
 
 function createId() {
   return crypto.randomUUID();
+}
+
+function textNotesStorageKey(userId: string) {
+  return `${TEXT_NOTES_STORAGE_PREFIX}:${userId}`;
+}
+
+function textNoteTargetKey(note: Pick<StoredTextNote, "songId" | "lineId" | "wordId" | "targetType">) {
+  return `${note.targetType}:${note.songId}:${note.lineId}:${note.wordId ?? ""}`;
+}
+
+function readStoredTextNotes(userId: string) {
+  try {
+    const rawNotes = localStorage.getItem(textNotesStorageKey(userId));
+    if (!rawNotes) {
+      return [];
+    }
+
+    const parsedNotes = JSON.parse(rawNotes) as Partial<StoredTextNote>[];
+    return parsedNotes.filter((note): note is StoredTextNote => Boolean(note.id && note.songId && note.lineId && note.targetType && note.text));
+  } catch {
+    localStorage.removeItem(textNotesStorageKey(userId));
+    return [];
+  }
+}
+
+function writeStoredTextNotes(userId: string, notes: StoredTextNote[]) {
+  localStorage.setItem(textNotesStorageKey(userId), JSON.stringify(notes));
+}
+
+function saveStoredTextNotes(userId: string, notes: StoredTextNote[]) {
+  const incomingKeys = new Set(notes.map(textNoteTargetKey));
+  const nextNotes = readStoredTextNotes(userId).filter((note) => !incomingKeys.has(textNoteTargetKey(note)));
+  writeStoredTextNotes(userId, [...nextNotes, ...notes]);
+}
+
+function removeStoredTextNotes(userId: string, noteIds: string[]) {
+  if (noteIds.length === 0) {
+    return;
+  }
+
+  const noteIdSet = new Set(noteIds);
+  writeStoredTextNotes(
+    userId,
+    readStoredTextNotes(userId).filter((note) => !noteIdSet.has(note.id))
+  );
+}
+
+function mergeStoredTextNotesIntoSongs(songs: Song[], storedNotes: StoredTextNote[]) {
+  const notesByLine = new Map<string, TextNote>();
+  const notesByWord = new Map<string, TextNote>();
+
+  for (const note of storedNotes) {
+    const textNote: TextNote = {
+      id: note.id,
+      text: note.text,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt
+    };
+
+    if (note.targetType === "line") {
+      notesByLine.set(note.lineId, textNote);
+    } else if (note.wordId) {
+      notesByWord.set(note.wordId, textNote);
+    }
+  }
+
+  return songs.map((song) => ({
+    ...song,
+    lyrics: song.lyrics.map((line) => ({
+      ...line,
+      textNote: notesByLine.get(line.id) ?? line.textNote,
+      words: line.words.map((word) => ({
+        ...word,
+        textNote: notesByWord.get(word.id) ?? word.textNote
+      }))
+    }))
+  }));
+}
+
+function isMissingTargetNotesError(error: { message?: string } | null) {
+  const message = error?.message?.toLowerCase() ?? "";
+  return message.includes("target_notes") || message.includes("schema cache");
 }
 
 function formatDuration(ms?: number) {
@@ -174,8 +270,8 @@ function makeAudioReference(path: string, blob: Blob, id = createId()): AudioRef
 
 function countMarkedTargets(song: Song) {
   return song.lyrics.reduce((total, line) => {
-    const lineCount = line.annotations.length > 0 || line.audioReference ? 1 : 0;
-    const wordCount = line.words.filter((word) => word.annotations.length > 0 || word.audioReference).length;
+    const lineCount = line.annotations.length > 0 || line.audioReference || line.textNote ? 1 : 0;
+    const wordCount = line.words.filter((word) => word.annotations.length > 0 || word.audioReference || word.textNote).length;
     return total + lineCount + wordCount;
   }, 0);
 }
@@ -183,8 +279,10 @@ function countMarkedTargets(song: Song) {
 function collectAudioPaths(song: Song) {
   const paths = new Set<string>();
 
-  if (song.songAudio?.storagePath) {
-    paths.add(song.songAudio.storagePath);
+  for (const audioReference of song.songAudios) {
+    if (audioReference.storagePath) {
+      paths.add(audioReference.storagePath);
+    }
   }
 
   for (const line of song.lyrics) {
@@ -209,6 +307,24 @@ function collectRemovedAudioPaths(previousSong: Song | undefined, nextSong: Song
 
   const nextPaths = new Set(collectAudioPaths(nextSong));
   return collectAudioPaths(previousSong).filter((path) => !nextPaths.has(path));
+}
+
+function getSpotifyTrackEmbedId(song: Song) {
+  if (song.spotifyTrackId) {
+    return song.spotifyTrackId;
+  }
+
+  if (!song.spotifyUrl) {
+    return "";
+  }
+
+  try {
+    const url = new URL(song.spotifyUrl);
+    const [, type, id] = url.pathname.split("/");
+    return type === "track" ? id : "";
+  } catch {
+    return "";
+  }
 }
 
 function markerPreferencesKey(userId: string) {
@@ -244,7 +360,7 @@ function buildSongFromDraft(draft: SongDraft, fallbackTitle: string, existingSon
     durationMs: draft.durationMs,
     sourceLyricsText: draft.lyricsText,
     lyrics,
-    songAudio: existingSong?.songAudio,
+    songAudios: existingSong?.songAudios ?? [],
     createdAt: existingSong?.createdAt ?? now,
     updatedAt: now
   };
@@ -263,12 +379,14 @@ type SelectedData =
       label: string;
       annotations: LineAnnotation[];
       audioReference?: AudioReference;
+      textNote?: TextNote;
     }
   | {
       type: "word";
       label: string;
       annotations: WordAnnotation[];
       audioReference?: AudioReference;
+      textNote?: TextNote;
     }
   | {
       type: "range";
@@ -278,6 +396,7 @@ type SelectedData =
         lineId: string;
         wordId: string;
         annotations: WordAnnotation[];
+        textNote?: TextNote;
       }>;
     };
 
@@ -360,6 +479,30 @@ function commonRangeAnnotations(addresses: SelectedWordAddress[]) {
   );
 }
 
+function visibleWordAnnotations(line: LyricLine, wordIndex: number) {
+  const word = line.words[wordIndex];
+  const previousWord = line.words[wordIndex - 1];
+
+  if (!word) {
+    return [];
+  }
+
+  return word.annotations.filter((annotation) => !previousWord?.annotations.some((previousAnnotation) => previousAnnotation.markerId === annotation.markerId));
+}
+
+function continuingWordMarkerIds(line: LyricLine, wordIndex: number) {
+  const word = line.words[wordIndex];
+  const previousWord = line.words[wordIndex - 1];
+
+  if (!word || !previousWord) {
+    return [];
+  }
+
+  return word.annotations
+    .filter((annotation) => previousWord.annotations.some((previousAnnotation) => previousAnnotation.markerId === annotation.markerId))
+    .map((annotation) => annotation.markerId);
+}
+
 function selectionShiftAnchor(song: Song | undefined, selection: LyricsSelection | null, songId: string): SelectedWordPoint | null {
   if (!song || !selection || selection.songId !== songId) {
     return null;
@@ -431,7 +574,8 @@ function findSelectedData(song: Song | undefined, selection: LyricsSelection | n
       wordTargets: addresses.map((address) => ({
         lineId: address.line.id,
         wordId: address.word.id,
-        annotations: address.word.annotations
+        annotations: address.word.annotations,
+        textNote: address.word.textNote
       }))
     };
   }
@@ -446,7 +590,8 @@ function findSelectedData(song: Song | undefined, selection: LyricsSelection | n
       type: "line" as const,
       label: line.text.trim() || emptyLineLabel,
       annotations: line.annotations,
-      audioReference: line.audioReference
+      audioReference: line.audioReference,
+      textNote: line.textNote
     };
   }
 
@@ -459,7 +604,8 @@ function findSelectedData(song: Song | undefined, selection: LyricsSelection | n
     type: "word" as const,
     label: word.text,
     annotations: word.annotations,
-    audioReference: word.audioReference
+    audioReference: word.audioReference,
+    textNote: word.textNote
   };
 }
 
@@ -492,6 +638,20 @@ function AudioDot({ onPlay, title }: { onPlay: () => void; title: string }) {
       onClick={onPlay}
     >
       <Play size={10} fill="currentColor" />
+    </button>
+  );
+}
+
+function NoteDot({ note, title }: { note: TextNote; title: string }) {
+  return (
+    <button
+      className="inline-grid size-[18px] place-items-center rounded-full border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-100"
+      type="button"
+      title={`${title}: ${note.text}`}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <StickyNote size={10} />
     </button>
   );
 }
@@ -550,7 +710,7 @@ function StoredAudioPlayer({
 function LyricsLine({
   line,
   songId,
-  onSelect,
+  onLineSelect,
   onWordPointerDown,
   onWordPointerMove,
   onWordPointerUp,
@@ -564,11 +724,11 @@ function LyricsLine({
 }: {
   line: LyricLine;
   songId: string;
-  onSelect: (target: SelectedTarget) => void;
-  onWordPointerDown: (event: React.PointerEvent<HTMLButtonElement>, lineId: string, wordId: string) => void;
-  onWordPointerMove: (event: React.PointerEvent<HTMLButtonElement>) => void;
-  onWordPointerUp: (event: React.PointerEvent<HTMLButtonElement>) => void;
-  onWordPointerCancel: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onLineSelect: (lineId: string, element: HTMLElement) => void;
+  onWordPointerDown: (event: React.PointerEvent<HTMLElement>, lineId: string, wordId: string) => void;
+  onWordPointerMove: (event: React.PointerEvent<HTMLElement>) => void;
+  onWordPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
+  onWordPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
   onWordKeyboardSelect: (lineId: string, wordId: string, element: HTMLElement) => void;
   onPlayAudio: (audioReference: AudioReference) => void;
   markerById: Map<string, Marker>;
@@ -578,94 +738,105 @@ function LyricsLine({
     emptyLine: string;
     lineAudio: string;
     wordAudio: string;
+    note: string;
   };
 }) {
   const lineIsSelected = selectedLineId === line.id;
-
-  function selectLineAt(x: number, y: number) {
-    onSelect({
-      songId,
-      type: "line",
-      lineId: line.id,
-      x,
-      y
-    });
-  }
-
-  function selectLine(event: React.MouseEvent) {
-    selectLineAt(event.clientX, event.clientY);
-  }
-
-  function selectLineFromElement(element: HTMLElement) {
-    const rect = element.getBoundingClientRect();
-    selectLineAt(rect.left + rect.width / 2, rect.top + rect.height / 2);
-  }
+  const lineHasRangeSelection = selectedWordIds.size > 1 && line.words.some((word) => selectedWordIds.has(word.id));
 
   return (
     <div
-      className={`grid min-h-12 grid-cols-1 gap-1 rounded-xl border px-3 py-2 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
-        lineIsSelected ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
+      data-lyric-selection-surface="true"
+      className={`grid min-h-12 cursor-pointer grid-cols-1 gap-1 rounded-xl border px-3 py-2 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
+        lineIsSelected || lineHasRangeSelection ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
       }`}
-      onClick={selectLine}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          selectLineFromElement(event.currentTarget);
-        }
-      }}
+      onClick={(event) => onLineSelect(line.id, event.currentTarget)}
     >
       <div className="flex flex-wrap items-start gap-1 pt-0.5 lg:justify-end">
         {line.annotations.map((annotation) => (
           <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
         ))}
         {line.audioReference ? <AudioDot onPlay={() => onPlayAudio(line.audioReference!)} title={labels.lineAudio} /> : null}
+        {line.textNote ? <NoteDot note={line.textNote} title={labels.note} /> : null}
       </div>
-      <div className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1 text-xl leading-relaxed text-stone-950 sm:text-2xl">
+      <div className="flex min-w-0 flex-wrap items-start gap-x-0 gap-y-1 text-xl leading-relaxed text-stone-950 sm:text-2xl">
         {line.words.length === 0 ? (
           <span className="text-sm text-stone-400">{labels.emptyLine}</span>
         ) : (
-          line.words.map((word) => {
+          line.words.map((word, wordIndex) => {
             const wordIsSelected = selectedWordIds.has(word.id);
+            const hasNextWord = wordIndex < line.words.length - 1;
+            const annotationsToShow = visibleWordAnnotations(line, wordIndex);
+            const continuingMarkerIds = continuingWordMarkerIds(line, wordIndex);
 
             return (
               <span className="inline-flex min-w-0 flex-col items-center gap-0.5 rounded-md" key={word.id}>
                 <span className="flex min-h-[18px] flex-wrap items-center justify-center gap-1">
-                  {word.annotations.map((annotation) => (
+                  {continuingMarkerIds.map((markerId) => {
+                    const marker = markerById.get(markerId);
+                    return (
+                      <span
+                        className="h-px w-full min-w-8 rounded-full"
+                        key={markerId}
+                        style={{ backgroundColor: marker?.color ?? "#059669" }}
+                        title={marker?.meaning}
+                      />
+                    );
+                  })}
+                  {annotationsToShow.map((annotation) => (
                     <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
                   ))}
                   {word.audioReference ? <AudioDot onPlay={() => onPlayAudio(word.audioReference!)} title={labels.wordAudio} /> : null}
+                  {word.textNote ? <NoteDot note={word.textNote} title={labels.note} /> : null}
                 </span>
-                <button
-                  className={`max-w-full touch-none select-none rounded px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-emerald-200 ${
-                    wordIsSelected ? "bg-emerald-100 ring-2 ring-emerald-200" : "hover:bg-emerald-50 hover:ring-2 hover:ring-emerald-100 focus:bg-emerald-50"
-                  }`}
-                  type="button"
-                  data-song-id={songId}
-                  data-line-id={line.id}
-                  data-word-id={word.id}
-                  onPointerDown={(event) => onWordPointerDown(event, line.id, word.id)}
-                  onPointerMove={onWordPointerMove}
-                  onPointerUp={onWordPointerUp}
-                  onPointerCancel={onWordPointerCancel}
-                  onLostPointerCapture={onWordPointerCancel}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (event.detail === 0) {
-                      onWordKeyboardSelect(line.id, word.id, event.currentTarget);
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
+                <span className="inline-flex items-center">
+                  <button
+                    className={`max-w-full touch-none select-none rounded px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-emerald-200 ${
+                      wordIsSelected ? "bg-emerald-100 ring-2 ring-emerald-200" : "hover:bg-emerald-50 hover:ring-2 hover:ring-emerald-100 focus:bg-emerald-50"
+                    }`}
+                    type="button"
+                    data-song-id={songId}
+                    data-line-id={line.id}
+                    data-word-id={word.id}
+                    onPointerDown={(event) => onWordPointerDown(event, line.id, word.id)}
+                    onPointerMove={onWordPointerMove}
+                    onPointerUp={onWordPointerUp}
+                    onPointerCancel={onWordPointerCancel}
+                    onLostPointerCapture={onWordPointerCancel}
+                    onClick={(event) => {
                       event.stopPropagation();
-                      onWordKeyboardSelect(line.id, word.id, event.currentTarget);
-                    }
-                  }}
-                >
-                  {word.text}
-                </button>
+                      if (event.detail === 0) {
+                        onWordKeyboardSelect(line.id, word.id, event.currentTarget);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onWordKeyboardSelect(line.id, word.id, event.currentTarget);
+                      }
+                    }}
+                  >
+                    {word.text}
+                  </button>
+                  {hasNextWord ? (
+                    <button
+                      className="h-[1.7em] w-3 touch-none select-none rounded transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                      type="button"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      data-song-id={songId}
+                      data-line-id={line.id}
+                      data-word-id={word.id}
+                      onPointerDown={(event) => onWordPointerDown(event, line.id, word.id)}
+                      onPointerMove={onWordPointerMove}
+                      onPointerUp={onWordPointerUp}
+                      onPointerCancel={onWordPointerCancel}
+                      onLostPointerCapture={onWordPointerCancel}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  ) : null}
+                </span>
               </span>
             );
           })
@@ -675,49 +846,138 @@ function LyricsLine({
   );
 }
 
-function SongAudioUploader({
+function SongMenuCard({
   song,
   onUpload,
   onRemove,
+  onEdit,
+  onDelete,
+  optionsOpen,
+  onToggleOptions,
   supabase,
   labels
 }: {
   song: Song;
   onUpload: (song: Song, file: File) => void;
-  onRemove: (song: Song) => void;
+  onRemove: (song: Song, audioReference: AudioReference) => void;
+  onEdit: (song: Song) => void;
+  onDelete: (song: Song) => void;
+  optionsOpen: boolean;
+  onToggleOptions: () => void;
   supabase: ReturnType<typeof createClient>;
   labels: {
-    title: string;
-    help: string;
+    coverAlt: string;
+    noArtist: string;
+    lines: string;
+    markers: string;
+    spotify: string;
     addFile: string;
+    edit: string;
+    delete: string;
     deleteAudio: string;
   };
 }) {
   return (
-    <div className="mx-auto mb-5 flex max-w-6xl flex-col gap-3 rounded-[1.25rem] border border-white/70 bg-white/[0.9] p-4 shadow-[0_18px_50px_rgba(0,104,83,0.12)] backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p className="text-xs font-bold uppercase text-stone-500">{labels.title}</p>
-        <p className="mt-1 text-sm leading-5 text-stone-600">{labels.help}</p>
+    <section className="relative grid gap-3 py-1">
+      <div className="relative aspect-square overflow-hidden rounded-xl border border-stone-200 bg-stone-100">
+        {song.albumArtUrl ? (
+          <Image className="size-full object-cover" src={song.albumArtUrl} alt={labels.coverAlt} width={640} height={640} />
+        ) : (
+          <div className="grid size-full place-items-center bg-stone-50 text-stone-500">
+            <Music2 size={28} />
+          </div>
+        )}
       </div>
-      {song.songAudio ? (
-        <div className="flex items-center gap-2">
-          <StoredAudioPlayer audioReference={song.songAudio} supabase={supabase} />
-          <button className={`${iconButtonClass} text-red-700`} type="button" onClick={() => onRemove(song)} title={labels.deleteAudio}>
-            <Trash2 size={16} />
-          </button>
-        </div>
-      ) : (
-        <label className={`${secondaryButtonClass} relative overflow-hidden`}>
-          <Upload size={16} />
+
+      <div className="relative min-w-0 pr-9" data-song-options-menu="true">
+        <p className="truncate text-[0.6875rem] font-semibold uppercase text-stone-500">{song.artist ?? labels.noArtist}</p>
+        <h2 className="mt-0.5 line-clamp-2 min-w-0 text-sm font-semibold leading-5 text-stone-950">{song.title}</h2>
+        <p className="mt-1 truncate text-xs text-stone-500">
+          {labels.lines} · {labels.markers}
+        </p>
+        <button
+          className={`absolute right-0 top-0 inline-grid size-7 place-items-center rounded-full border bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 ${
+            optionsOpen ? "border-stone-300 bg-stone-50" : "border-stone-200"
+          }`}
+          type="button"
+          onClick={onToggleOptions}
+          aria-expanded={optionsOpen}
+          aria-haspopup="menu"
+          aria-label="Song options"
+          title="Song options"
+        >
+          <Ellipsis size={15} />
+        </button>
+        {optionsOpen ? (
+          <div className="absolute right-0 top-8 z-30 w-48 rounded-xl border border-stone-200 bg-white p-1.5" role="menu">
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-stone-700 transition hover:bg-stone-50"
+              type="button"
+              onClick={() => onEdit(song)}
+              role="menuitem"
+            >
+              <Pencil size={13} />
+              {labels.edit}
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-red-700 transition hover:bg-red-50"
+              type="button"
+              onClick={() => onDelete(song)}
+              role="menuitem"
+            >
+              <Trash2 size={13} />
+              {labels.delete}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {song.spotifyUrl ? (
+          <a className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-stone-950 px-3 text-xs font-semibold text-white transition hover:bg-stone-800" href={song.spotifyUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={13} />
+            {labels.spotify}
+          </a>
+        ) : null}
+        <label className="relative inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 overflow-hidden rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white transition hover:bg-emerald-700">
+          <Upload size={13} />
           <span>{labels.addFile}</span>
-          <input
-            className="absolute inset-0 cursor-pointer opacity-0"
-            type="file"
-            accept="audio/*"
-            onChange={(event) => event.target.files?.[0] && onUpload(song, event.target.files[0])}
-          />
+          <input className="absolute inset-0 cursor-pointer opacity-0" type="file" accept="audio/*" onChange={(event) => event.target.files?.[0] && onUpload(song, event.target.files[0])} />
         </label>
-      )}
+      </div>
+
+      {song.songAudios.length > 0 ? (
+        <div className="grid gap-2">
+          {song.songAudios.map((audioReference) => (
+            <div className="flex min-w-0 items-center gap-2" key={audioReference.id}>
+              <StoredAudioPlayer audioReference={audioReference} supabase={supabase} />
+              <button className={`${iconButtonClass} size-8 rounded-full text-red-700`} type="button" onClick={() => onRemove(song, audioReference)} title={labels.deleteAudio}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function SpotifyTrackPlayer({ song, title }: { song: Song; title: string }) {
+  const trackId = getSpotifyTrackEmbedId(song);
+
+  if (!trackId) {
+    return null;
+  }
+
+  return (
+    <div className="mx-auto mb-5 max-w-6xl overflow-hidden rounded-[1.25rem] border border-white/70 bg-white/[0.9] p-2 shadow-[0_18px_50px_rgba(0,104,83,0.12)] backdrop-blur-md">
+      <iframe
+        className="block h-20 w-full rounded-[1rem]"
+        title={title}
+        src={`https://open.spotify.com/embed/track/${encodeURIComponent(trackId)}?utm_source=generator`}
+        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+        loading="lazy"
+      />
     </div>
   );
 }
@@ -755,7 +1015,7 @@ export function VocalMapApp({
   const [songs, setSongs] = useState<Song[]>(initialData.songs);
   const [markers, setMarkers] = useState<Marker[]>(translatedInitialMarkers);
   const [customMarkerDraft, setCustomMarkerDraft] = useState(EMPTY_CUSTOM_MARKER);
-  const [isMarkerPanelOpen, setIsMarkerPanelOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMarkerFormOpen, setIsMarkerFormOpen] = useState(false);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
@@ -763,7 +1023,7 @@ export function VocalMapApp({
   const [systemMarkerOverrides, setSystemMarkerOverrides] = useState<Record<string, MarkerDraft>>({});
   const [activeSongId, setActiveSongId] = useState<string | null>(initialData.songs[0]?.id ?? null);
   const [localSearch, setLocalSearch] = useState("");
-  const [isSongSearchOpen, setIsSongSearchOpen] = useState(false);
+  const [isLibrarySearchOpen, setIsLibrarySearchOpen] = useState(false);
   const [draft, setDraft] = useState<SongDraft>(EMPTY_DRAFT);
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
   const [selection, setSelection] = useState<LyricsSelection | null>(null);
@@ -774,6 +1034,8 @@ export function VocalMapApp({
   const [isSearchingSpotify, setIsSearchingSpotify] = useState(false);
   const [importingTrackId, setImportingTrackId] = useState<string | null>(null);
   const [recordingTarget, setRecordingTarget] = useState("");
+  const [isNoteEditorOpen, setIsNoteEditorOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [hasLocalData, setHasLocalData] = useState(false);
@@ -783,6 +1045,8 @@ export function VocalMapApp({
     vocalGoal: initialProfile.vocalGoal ?? ""
   });
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [openSongOptionsId, setOpenSongOptionsId] = useState<string | null>(null);
   const [isProfileGateReady, setIsProfileGateReady] = useState(initialProfile.onboardingCompleted);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState("");
@@ -790,6 +1054,7 @@ export function VocalMapApp({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const librarySearchInputRef = useRef<HTMLInputElement | null>(null);
   const recordingSelectionRef = useRef<SelectedTarget | null>(null);
   const wordSelectionDragRef = useRef<{
     pointerId: number;
@@ -801,12 +1066,43 @@ export function VocalMapApp({
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        setIsNoteEditorOpen(false);
+        setNoteDraft("");
+        setOpenSongOptionsId(null);
         setSelection(null);
+        setIsSettingsOpen(false);
       }
     }
 
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      if (!target.closest("[data-profile-menu]")) {
+        setIsProfileMenuOpen(false);
+      }
+
+      if (!target.closest("[data-song-options-menu]")) {
+        setOpenSongOptionsId(null);
+      }
+
+      if (target.closest("[data-lyric-selection-surface], [data-marker-popover]")) {
+        return;
+      }
+
+      setIsNoteEditorOpen(false);
+      setNoteDraft("");
+      setSelection(null);
+    }
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("pointerdown", handlePointerDown);
+    };
   }, []);
 
   useEffect(() => {
@@ -893,6 +1189,23 @@ export function VocalMapApp({
     return () => window.clearTimeout(timeoutId);
   }, [userId]);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const storedNotes = readStoredTextNotes(userId);
+      if (storedNotes.length > 0) {
+        setSongs((currentSongs) => mergeStoredTextNotesIntoSongs(currentSongs, storedNotes));
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [userId]);
+
+  useEffect(() => {
+    if (isLibrarySearchOpen) {
+      librarySearchInputRef.current?.focus();
+    }
+  }, [isLibrarySearchOpen]);
+
   const effectiveActiveSongId = activeSongId ?? songs[0]?.id ?? null;
   const activeSong = useMemo(() => songs.find((song) => song.id === effectiveActiveSongId), [effectiveActiveSongId, songs]);
   const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
@@ -920,15 +1233,25 @@ export function VocalMapApp({
     await supabase.storage.from(AUDIO_BUCKET).remove(uniquePaths);
   }
 
+  function closeNoteEditor() {
+    setIsNoteEditorOpen(false);
+    setNoteDraft("");
+  }
+
   function openManualDraft() {
     setEditingSongId("new");
     setDraft(EMPTY_DRAFT);
+    setSpotifyQuery("");
+    setSpotifyResults([]);
+    setSpotifyMessage("");
+    closeNoteEditor();
     setSelection(null);
   }
 
   function openSongEditor(song: Song) {
     setEditingSongId(song.id);
     setDraft(songToDraft(song));
+    closeNoteEditor();
     setSelection(null);
   }
 
@@ -941,7 +1264,7 @@ export function VocalMapApp({
   }
 
   function openMarkerCreate() {
-    setIsMarkerPanelOpen(true);
+    setIsSettingsOpen(true);
     setEditingMarkerId(null);
     setSelectedMarkerId(null);
     setCustomMarkerDraft(EMPTY_CUSTOM_MARKER);
@@ -949,7 +1272,7 @@ export function VocalMapApp({
   }
 
   function openMarkerEdit(marker: Marker) {
-    setIsMarkerPanelOpen(true);
+    setIsSettingsOpen(true);
     setSelectedMarkerId(marker.id);
     setEditingMarkerId(marker.id);
     setCustomMarkerDraft({
@@ -1116,6 +1439,7 @@ export function VocalMapApp({
 
       setActiveSongId(song.id);
       setEditingSongId(null);
+      closeNoteEditor();
       setSelection(null);
       setStatusMessage(t("songSaved"));
     } catch {
@@ -1140,6 +1464,7 @@ export function VocalMapApp({
     await deleteStoragePaths(collectAudioPaths(song));
     setSongs((currentSongs) => currentSongs.filter((item) => item.id !== song.id));
     setActiveSongId((currentId) => (currentId === song.id ? null : currentId));
+    closeNoteEditor();
     setSelection(null);
     setStatusMessage(t("songDeleted"));
   }
@@ -1409,11 +1734,12 @@ export function VocalMapApp({
     });
     setEditingSongId("new");
     setActiveSongId(null);
+    closeNoteEditor();
     setSelection(null);
     setImportingTrackId(null);
   }
 
-  function beginWordSelection(event: React.PointerEvent<HTMLButtonElement>, lineId: string, wordId: string) {
+  function beginWordSelection(event: React.PointerEvent<HTMLElement>, lineId: string, wordId: string) {
     if (!activeSong) {
       return;
     }
@@ -1438,10 +1764,11 @@ export function VocalMapApp({
     };
 
     setIsSelectingWords(true);
+    closeNoteEditor();
     setSelection(makeWordOrRangeSelection(activeSong.id, anchor, focus, event.clientX, event.clientY));
   }
 
-  function updateWordSelectionFromPointer(event: React.PointerEvent<HTMLButtonElement>) {
+  function updateWordSelectionFromPointer(event: React.PointerEvent<HTMLElement>) {
     const dragState = wordSelectionDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
@@ -1464,10 +1791,11 @@ export function VocalMapApp({
       ...dragState,
       focus
     };
+    closeNoteEditor();
     setSelection(makeWordOrRangeSelection(dragState.songId, dragState.anchor, focus, event.clientX, event.clientY));
   }
 
-  function finishWordSelection(event: React.PointerEvent<HTMLButtonElement>) {
+  function finishWordSelection(event: React.PointerEvent<HTMLElement>) {
     const dragState = wordSelectionDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
@@ -1484,7 +1812,7 @@ export function VocalMapApp({
     }
   }
 
-  function cancelWordSelection(event: React.PointerEvent<HTMLButtonElement>) {
+  function cancelWordSelection(event: React.PointerEvent<HTMLElement>) {
     const dragState = wordSelectionDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
@@ -1501,6 +1829,7 @@ export function VocalMapApp({
     }
 
     const rect = element.getBoundingClientRect();
+    closeNoteEditor();
     setSelection({
       songId: activeSong.id,
       type: "word",
@@ -1511,15 +1840,34 @@ export function VocalMapApp({
     });
   }
 
+  function selectLineFromSide(lineId: string, element: HTMLElement) {
+    if (!activeSong) {
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    closeNoteEditor();
+    setSelection({
+      songId: activeSong.id,
+      type: "line",
+      lineId,
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
+    });
+  }
+
   function updateSelectedTarget(
     target: SelectedTarget,
     updater: (payload: {
       annotations: Array<LineAnnotation | WordAnnotation>;
       audioReference?: AudioReference;
+      textNote?: TextNote;
     }) => {
       annotations?: Array<LineAnnotation | WordAnnotation>;
       audioReference?: AudioReference;
       removeAudio?: boolean;
+      textNote?: TextNote;
+      removeTextNote?: boolean;
     }
   ) {
     const now = new Date().toISOString();
@@ -1538,13 +1886,15 @@ export function VocalMapApp({
           if (target.type === "line") {
             const result = updater({
               annotations: line.annotations,
-              audioReference: line.audioReference
+              audioReference: line.audioReference,
+              textNote: line.textNote
             });
 
             return {
               ...line,
               annotations: (result.annotations as LineAnnotation[] | undefined) ?? line.annotations,
-              audioReference: result.removeAudio ? undefined : result.audioReference ?? line.audioReference
+              audioReference: result.removeAudio ? undefined : result.audioReference ?? line.audioReference,
+              textNote: result.removeTextNote ? undefined : result.textNote ?? line.textNote
             };
           }
 
@@ -1557,13 +1907,15 @@ export function VocalMapApp({
 
               const result = updater({
                 annotations: word.annotations,
-                audioReference: word.audioReference
+                audioReference: word.audioReference,
+                textNote: word.textNote
               });
 
               return {
                 ...word,
                 annotations: (result.annotations as WordAnnotation[] | undefined) ?? word.annotations,
-                audioReference: result.removeAudio ? undefined : result.audioReference ?? word.audioReference
+                audioReference: result.removeAudio ? undefined : result.audioReference ?? word.audioReference,
+                textNote: result.removeTextNote ? undefined : result.textNote ?? word.textNote
               };
             })
           };
@@ -1584,8 +1936,11 @@ export function VocalMapApp({
       lineId: string;
       wordId: string;
       annotations: WordAnnotation[];
+      textNote?: TextNote;
     }) => {
       annotations?: WordAnnotation[];
+      textNote?: TextNote;
+      removeTextNote?: boolean;
     }
   ) {
     const now = new Date().toISOString();
@@ -1613,12 +1968,14 @@ export function VocalMapApp({
               const result = updater({
                 lineId: line.id,
                 wordId: word.id,
-                annotations: word.annotations
+                annotations: word.annotations,
+                textNote: word.textNote
               });
 
               return {
                 ...word,
-                annotations: result.annotations ?? word.annotations
+                annotations: result.annotations ?? word.annotations,
+                textNote: result.removeTextNote ? undefined : result.textNote ?? word.textNote
               };
             })
           })),
@@ -1626,6 +1983,218 @@ export function VocalMapApp({
         };
       })
     );
+  }
+
+  function currentNoteText() {
+    if (!selectedData) {
+      return "";
+    }
+
+    if (selectedData.type === "range") {
+      const notes = selectedData.wordTargets.map((target) => target.textNote?.text ?? "");
+      const [firstNote = ""] = notes;
+      return notes.every((note) => note === firstNote) ? firstNote : "";
+    }
+
+    return selectedData.textNote?.text ?? "";
+  }
+
+  function hasSelectedTextNote() {
+    if (!selectedData) {
+      return false;
+    }
+
+    if (selectedData.type === "range") {
+      return selectedData.wordTargets.some((target) => Boolean(target.textNote));
+    }
+
+    return Boolean(selectedData.textNote);
+  }
+
+  function openNoteEditor() {
+    setNoteDraft(currentNoteText());
+    setIsNoteEditorOpen(true);
+  }
+
+  async function deleteTextNoteFromSelection() {
+    if (!selection || !selectedData) {
+      return;
+    }
+
+    if (selection.type === "range") {
+      if (selectedData.type !== "range") {
+        return;
+      }
+
+      const noteIds = selectedData.wordTargets.flatMap((target) => (target.textNote ? [target.textNote.id] : []));
+      if (noteIds.length > 0) {
+        const { error } = await supabase.from("target_notes").delete().eq("user_id", userId).in("id", noteIds);
+        if (error && !isMissingTargetNotesError(error)) {
+          setStatusMessage(t("noteSaveFailed"));
+          return;
+        }
+        removeStoredTextNotes(userId, noteIds);
+      }
+
+      updateSelectedRangeTarget(selection, () => ({ removeTextNote: true }));
+      setNoteDraft("");
+      setIsNoteEditorOpen(false);
+      setStatusMessage(t("noteDeleted"));
+      return;
+    }
+
+    if (selectedData.type === "range" || !selectedData.textNote) {
+      setNoteDraft("");
+      setIsNoteEditorOpen(false);
+      return;
+    }
+
+    const { error } = await supabase.from("target_notes").delete().eq("id", selectedData.textNote.id).eq("user_id", userId);
+    if (error && !isMissingTargetNotesError(error)) {
+      setStatusMessage(t("noteSaveFailed"));
+      return;
+    }
+    removeStoredTextNotes(userId, [selectedData.textNote.id]);
+
+    updateSelectedTarget(selection, () => ({ removeTextNote: true }));
+    setNoteDraft("");
+    setIsNoteEditorOpen(false);
+    setStatusMessage(t("noteDeleted"));
+  }
+
+  async function saveTextNote(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selection || !selectedData) {
+      return;
+    }
+
+    const text = noteDraft.trim();
+    if (!text) {
+      await deleteTextNoteFromSelection();
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    if (selection.type === "range") {
+      if (selectedData.type !== "range" || selectedData.wordTargets.length === 0) {
+        return;
+      }
+
+      const noteByWordId = new Map<string, TextNote>();
+      const rows: TablesInsert<"target_notes">[] = selectedData.wordTargets.map((target) => {
+        const note: TextNote = {
+          id: target.textNote?.id ?? createId(),
+          text,
+          createdAt: target.textNote?.createdAt ?? now,
+          updatedAt: now
+        };
+        noteByWordId.set(target.wordId, note);
+
+        return {
+          id: note.id,
+          user_id: userId,
+          song_id: selection.songId,
+          line_id: target.lineId,
+          word_id: target.wordId,
+          target_type: "word",
+          text
+        };
+      });
+
+      const { error } = await supabase.from("target_notes").upsert(rows, {
+        onConflict: "user_id,target_type,song_id,line_id,word_id"
+      });
+      if (error) {
+        if (!isMissingTargetNotesError(error)) {
+          setStatusMessage(t("noteSaveFailed"));
+          return;
+        }
+
+        saveStoredTextNotes(
+          userId,
+          selectedData.wordTargets.flatMap((target) => {
+            const note = noteByWordId.get(target.wordId);
+            return note
+              ? [
+                  {
+                    id: note.id,
+                    songId: selection.songId,
+                    lineId: target.lineId,
+                    wordId: target.wordId,
+                    targetType: "word" as const,
+                    text: note.text,
+                    createdAt: note.createdAt,
+                    updatedAt: note.updatedAt
+                  }
+                ]
+              : [];
+          })
+        );
+      } else {
+        removeStoredTextNotes(
+          userId,
+          Array.from(noteByWordId.values()).map((note) => note.id)
+        );
+      }
+
+      updateSelectedRangeTarget(selection, ({ wordId }) => {
+        const textNote = noteByWordId.get(wordId);
+        return textNote ? { textNote } : {};
+      });
+      setIsNoteEditorOpen(false);
+      setStatusMessage(t("noteSaved"));
+      return;
+    }
+
+    if (selectedData.type === "range") {
+      return;
+    }
+
+    const textNote: TextNote = {
+      id: selectedData.textNote?.id ?? createId(),
+      text,
+      createdAt: selectedData.textNote?.createdAt ?? now,
+      updatedAt: now
+    };
+    const row: TablesInsert<"target_notes"> = {
+      id: textNote.id,
+      user_id: userId,
+      song_id: selection.songId,
+      line_id: selection.lineId,
+      word_id: selection.type === "word" ? selection.wordId : null,
+      target_type: selection.type,
+      text
+    };
+
+    const { error } = await supabase.from("target_notes").upsert(row, {
+      onConflict: "user_id,target_type,song_id,line_id,word_id"
+    });
+    if (error) {
+      if (!isMissingTargetNotesError(error)) {
+        setStatusMessage(t("noteSaveFailed"));
+        return;
+      }
+
+      saveStoredTextNotes(userId, [
+        {
+          id: textNote.id,
+          songId: selection.songId,
+          lineId: selection.lineId,
+          wordId: selection.type === "word" ? selection.wordId : null,
+          targetType: selection.type,
+          text: textNote.text,
+          createdAt: textNote.createdAt,
+          updatedAt: textNote.updatedAt
+        }
+      ]);
+    } else {
+      removeStoredTextNotes(userId, [textNote.id]);
+    }
+
+    updateSelectedTarget(selection, () => ({ textNote }));
+    setIsNoteEditorOpen(false);
+    setStatusMessage(t("noteSaved"));
   }
 
   async function toggleMarker(markerId: string) {
@@ -1748,7 +2317,7 @@ export function VocalMapApp({
 
     const audioReference = makeAudioReference(storagePath, blob, audioId);
     const existingSelectedData = target.type === "song" ? null : findSelectedData(songs.find((song) => song.id === target.songId), target, common("emptyLine"));
-    const existingAudio = target.type === "song" ? songs.find((song) => song.id === target.songId)?.songAudio : existingSelectedData?.type === "range" ? undefined : existingSelectedData?.audioReference;
+    const existingAudio = target.type === "song" ? undefined : existingSelectedData?.type === "range" ? undefined : existingSelectedData?.audioReference;
 
     if (existingAudio) {
       const { error } = await supabase.from("audio_references").delete().eq("id", existingAudio.id).eq("user_id", userId);
@@ -1877,7 +2446,7 @@ export function VocalMapApp({
     try {
       const audioReference = await persistAudioReference({ songId: song.id, type: "song" }, file);
       setSongs((currentSongs) =>
-        currentSongs.map((item) => (item.id === song.id ? { ...item, songAudio: audioReference, updatedAt: new Date().toISOString() } : item))
+        currentSongs.map((item) => (item.id === song.id ? { ...item, songAudios: [...item.songAudios, audioReference], updatedAt: new Date().toISOString() } : item))
       );
       setStatusMessage(t("songAudioSaved"));
     } catch {
@@ -1885,20 +2454,18 @@ export function VocalMapApp({
     }
   }
 
-  async function removeSongAudio(song: Song) {
-    if (!song.songAudio) {
-      return;
-    }
-
-    const { error } = await supabase.from("audio_references").delete().eq("id", song.songAudio.id).eq("user_id", userId);
+  async function removeSongAudio(song: Song, audioReference: AudioReference) {
+    const { error } = await supabase.from("audio_references").delete().eq("id", audioReference.id).eq("user_id", userId);
     if (error) {
       setStatusMessage(t("deleteFailed"));
       return;
     }
 
-    await deleteStoragePaths([song.songAudio.storagePath]);
+    await deleteStoragePaths([audioReference.storagePath]);
     setSongs((currentSongs) =>
-      currentSongs.map((item) => (item.id === song.id ? { ...item, songAudio: undefined, updatedAt: new Date().toISOString() } : item))
+      currentSongs.map((item) =>
+        item.id === song.id ? { ...item, songAudios: item.songAudios.filter((itemAudio) => itemAudio.id !== audioReference.id), updatedAt: new Date().toISOString() } : item
+      )
     );
     setStatusMessage(t("songAudioRemoved"));
   }
@@ -1914,11 +2481,11 @@ export function VocalMapApp({
 
   return (
     <div
-      className="relative grid h-dvh grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden bg-[#87f0dc] bg-cover bg-center p-3 md:grid-cols-[20rem_minmax(0,1fr)] md:grid-rows-1"
+      className="relative grid h-dvh grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden bg-[#87f0dc] bg-cover bg-center p-3 md:grid-cols-[22rem_minmax(0,1fr)] md:grid-rows-1"
       style={{ backgroundImage: "url('/images/auth-green-bg.png')" }}
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(220,255,246,0.18),rgba(35,181,156,0.12)_46%,rgba(12,130,111,0.24)_100%)]" />
-      <aside className="relative z-10 flex max-h-[42dvh] min-h-0 flex-col gap-4 overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-4 shadow-[0_28px_80px_rgba(0,104,83,0.20)] backdrop-blur-md md:h-full md:max-h-none">
+      <aside className="relative z-10 flex max-h-[42dvh] min-h-0 flex-col gap-3 overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-3 shadow-[0_28px_80px_rgba(0,104,83,0.20)] md:h-full md:max-h-none">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="grid size-10 flex-none place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.24)]">
@@ -1929,11 +2496,23 @@ export function VocalMapApp({
               <p className="truncate text-xs text-stone-500">{t("brandSubtitle")}</p>
             </div>
           </div>
-          <form action={signOutAction}>
-            <button className={`${iconButtonClass} size-9`} type="submit" title={common("signOut")}>
-              <LogOut size={16} />
-            </button>
-          </form>
+          <button
+            className={`inline-grid size-9 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 ${
+              isSettingsOpen ? "border-stone-300 bg-stone-50 text-stone-950" : "border-stone-200"
+            }`}
+            type="button"
+            onClick={() => {
+              setIsSettingsOpen((isOpen) => !isOpen);
+              setIsMarkerFormOpen(false);
+              setEditingMarkerId(null);
+              setSelectedMarkerId(null);
+            }}
+            aria-expanded={isSettingsOpen}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings2 size={17} />
+          </button>
         </div>
 
         {hasLocalData ? (
@@ -1947,260 +2526,205 @@ export function VocalMapApp({
           </button>
         ) : null}
 
-        <button className={`${primaryButtonClass} w-full`} type="button" onClick={openManualDraft}>
-          <Plus size={16} />
-          {t("newSong")}
-        </button>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
-        <section className="grid gap-3 border-t border-emerald-100 pt-3">
-          <button
-            className="flex min-h-11 items-center justify-between gap-3 rounded-2xl px-1 text-left transition hover:bg-emerald-50/70"
-            type="button"
-            onClick={() => setIsSongSearchOpen((isOpen) => !isOpen)}
-            aria-expanded={isSongSearchOpen}
-          >
-            <span className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase text-stone-500">
-              <Search size={14} />
-              <span className="truncate">{t("musicSearchTitle")}</span>
-            </span>
-            <span className="inline-flex flex-none items-center gap-2 text-xs font-bold text-emerald-700">
-              {spotifyResults.length > 0 ? t("searchResultsCount", { count: spotifyResults.length }) : t("searchClosedLabel")}
-              <ChevronDown className={`size-4 transition ${isSongSearchOpen ? "rotate-180" : ""}`} />
-            </span>
-          </button>
-          {isSongSearchOpen ? (
-            <>
-              <form
-                className="flex gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void searchSpotify();
-                }}
-              >
-                <input className={inputClass} value={spotifyQuery} onChange={(event) => setSpotifyQuery(event.target.value)} placeholder={t("musicSearchPlaceholder")} />
-                <button className={iconButtonClass} type="submit" disabled={isSearchingSpotify} title={common("search")}>
-                  {isSearchingSpotify ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-                </button>
-              </form>
-              {spotifyMessage ? <p className="text-sm leading-5 text-stone-600">{spotifyMessage}</p> : null}
-              <div className="grid max-h-56 gap-1 overflow-auto pr-1">
-                {spotifyResults.map((track) => (
-                  <button
-                    className="grid grid-cols-[2.375rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-transparent p-2 text-left transition hover:border-stone-200 hover:bg-stone-50"
-                    type="button"
-                    key={track.id}
-                    onClick={() => void importSpotifyTrack(track)}
-                  >
-                    {track.albumArtUrl ? (
-                      <Image className="rounded object-cover" src={track.albumArtUrl} alt={t("coverAlt", { title: track.title })} width={38} height={38} />
-                    ) : (
-                      <div className="grid size-[38px] place-items-center rounded bg-stone-100 text-stone-400">
-                        <Music2 size={15} />
-                      </div>
-                    )}
-                    <span className="min-w-0">
-                      <strong className="block truncate text-sm font-semibold text-stone-950">{track.title}</strong>
-                      <small className="block truncate text-xs text-stone-500">
-                        {track.artist} · {formatDuration(track.durationMs)}
-                        {track.source === "lrclib" ? " · LRCLIB" : ""}
-                      </small>
-                    </span>
-                    {importingTrackId === track.id ? <Loader2 className="spin size-4" /> : <Plus size={15} />}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : null}
-        </section>
-
-        <section className="grid gap-3 border-t border-emerald-100 pt-3">
-          <button
-            className="flex min-h-11 items-center justify-between gap-3 rounded-2xl px-1 text-left transition hover:bg-emerald-50/70"
-            type="button"
-            onClick={() => {
-              setIsMarkerPanelOpen((isOpen) => !isOpen);
-              setIsMarkerFormOpen(false);
-              setEditingMarkerId(null);
-              setSelectedMarkerId(null);
+        {activeSong ? (
+          <SongMenuCard
+            song={activeSong}
+            onUpload={(song, file) => void uploadSongAudio(song, file)}
+            onRemove={(song, audioReference) => void removeSongAudio(song, audioReference)}
+            onEdit={(song) => {
+              setOpenSongOptionsId(null);
+              openSongEditor(song);
             }}
-            aria-expanded={isMarkerPanelOpen}
-          >
-            <span className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase text-stone-500">
-              <Sparkles size={14} />
-              <span className="truncate">{t("markerPanelTitle")}</span>
-            </span>
-            <span className="inline-flex flex-none items-center gap-2 text-xs font-bold text-emerald-700">
-              {t("markerCount", { count: visibleMarkers.length })}
-              <ChevronDown className={`size-4 transition ${isMarkerPanelOpen ? "rotate-180" : ""}`} />
-            </span>
-          </button>
-          {isMarkerPanelOpen ? (
-            <>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs leading-5 text-stone-500">{t("markerPanelHint")}</p>
-            <button
-              className="inline-flex h-8 flex-none items-center justify-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"
-              type="button"
-              onClick={openMarkerCreate}
-            >
-              <Plus size={13} />
-              {t("markerAddAction")}
-            </button>
-          </div>
-          <div className="flex max-h-36 flex-wrap gap-1.5 overflow-auto pr-1">
-            {visibleMarkers.map((marker) => {
-              const Icon = markerIcons[marker.icon];
-              const isSelected = selectedMarkerId === marker.id;
-              return (
-                <button
-                  className={`inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs font-bold transition hover:shadow-sm ${
-                    isSelected ? "ring-2 ring-emerald-300 ring-offset-1 ring-offset-white" : ""
-                  }`}
-                  type="button"
-                  key={marker.id}
-                  style={makeMarkerStyle(marker)}
-                  onClick={() => {
-                    setSelectedMarkerId((currentId) => (currentId === marker.id ? null : marker.id));
-                    setIsMarkerFormOpen(false);
-                    setEditingMarkerId(null);
-                  }}
-                  title={marker.meaning}
-                  aria-pressed={isSelected}
-                >
-                  <Icon size={12} strokeWidth={2.4} />
-                  <span className="truncate">{marker.label}</span>
-                </button>
-              );
-            })}
-          </div>
-          {selectedMarker && !isMarkerFormOpen ? (
-            <div className="grid gap-2 rounded-2xl border border-emerald-100 bg-white/75 p-2.5">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="size-3 flex-none rounded-full" style={{ backgroundColor: selectedMarker.color }} />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-stone-950">{selectedMarker.label}</p>
-                  <p className="truncate text-xs leading-5 text-stone-500">{selectedMarker.meaning}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="button" onClick={() => openMarkerEdit(selectedMarker)}>
-                  <Pencil size={13} />
-                  {common("edit")}
-                </button>
-                <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs text-red-700 hover:border-red-200 hover:bg-red-50`} type="button" onClick={() => void removeMarker(selectedMarker.id)}>
-                  <Trash2 size={13} />
-                  {selectedMarker.isSystem ? t("markerHide") : common("delete")}
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {hiddenSystemMarkerIds.size > 0 || Object.keys(systemMarkerOverrides).length > 0 ? (
-            <button className="justify-self-start text-xs font-semibold text-emerald-700 transition hover:text-emerald-900" type="button" onClick={resetSystemMarkers}>
-              {t("markerResetDefaults")}
-            </button>
-          ) : null}
-          {isMarkerFormOpen ? (
-            <form className="grid gap-2 rounded-2xl border border-emerald-100 bg-white/80 p-3 shadow-sm" onSubmit={(event) => void saveMarker(event)}>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-bold uppercase text-stone-500">{editingMarkerId ? t("markerEditTitle") : t("markerCreateTitle")}</p>
-                <button className={`${iconButtonClass} size-7 rounded-full border-transparent`} type="button" onClick={closeMarkerForm} title={common("close")}>
-                  <X size={13} />
-                </button>
-              </div>
-              <input className={inputClass} value={customMarkerDraft.label} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, label: event.target.value }))} placeholder={t("markerNamePlaceholder")} maxLength={14} />
-              <input className={inputClass} value={customMarkerDraft.meaning} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, meaning: event.target.value }))} placeholder={t("markerMeaningPlaceholder")} />
-              <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2">
-                <input
-                  className="h-10 min-w-0 rounded-xl border border-stone-200 bg-white p-1"
-                  type="color"
-                  value={customMarkerDraft.color}
-                  onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, color: event.target.value }))}
-                  title={t("markerColorTitle")}
-                />
-                <select className={inputClass} value={customMarkerDraft.icon} onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, icon: event.target.value as MarkerIconName }))}>
-                  {MARKER_ICON_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {markerIconLabels(option.value)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button className={secondaryButtonClass} type="button" onClick={closeMarkerForm}>
-                  {common("cancel")}
-                </button>
-                <button className={primaryButtonClass} type="submit">
-                  {editingMarkerId ? t("markerUpdate") : common("add")}
-                </button>
-              </div>
-            </form>
-          ) : null}
-            </>
-          ) : null}
-        </section>
+            onDelete={(song) => {
+              setOpenSongOptionsId(null);
+              void deleteSong(song);
+            }}
+            optionsOpen={openSongOptionsId === `active:${activeSong.id}`}
+            onToggleOptions={() => setOpenSongOptionsId((currentId) => (currentId === `active:${activeSong.id}` ? null : `active:${activeSong.id}`))}
+            supabase={supabase}
+            labels={{
+              coverAlt: t("coverAlt", { title: activeSong.title }),
+              noArtist: common("noArtist"),
+              lines: t("linesCount", { count: activeSong.lyrics.length }),
+              markers: t("markersCount", { count: countMarkedTargets(activeSong) }),
+              spotify: common("spotify"),
+              addFile: t("addAudioFile"),
+              edit: common("edit"),
+              delete: common("delete"),
+              deleteAudio: t("deleteSongAudio")
+            }}
+          />
+        ) : null}
 
-        <section className="grid min-h-0 gap-3 border-t border-emerald-100 pt-4">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
-            <Library size={14} />
-            {t("libraryTitle")}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto border-t border-stone-200 pt-3 pr-1">
+        <section className="grid min-h-0 gap-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase text-stone-500">
+              <Library size={14} />
+              <span className="truncate">{t("libraryTitle")}</span>
+            </div>
+            <button
+              className={`inline-grid size-8 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-emerald-200 hover:bg-emerald-50 ${
+                isLibrarySearchOpen || localSearch ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-stone-200"
+              }`}
+              type="button"
+              onClick={() => {
+                if (isLibrarySearchOpen && !localSearch) {
+                  setIsLibrarySearchOpen(false);
+                  return;
+                }
+
+                setIsLibrarySearchOpen(true);
+              }}
+              aria-label={t("librarySearchPlaceholder")}
+              title={t("librarySearchPlaceholder")}
+            >
+              <Search size={15} />
+            </button>
           </div>
-          <input className={inputClass} value={localSearch} onChange={(event) => setLocalSearch(event.target.value)} placeholder={t("librarySearchPlaceholder")} />
-          <div className="grid max-h-56 min-h-0 gap-1 overflow-auto pr-1">
+          {isLibrarySearchOpen ? (
+            <input
+              ref={librarySearchInputRef}
+              className={inputClass}
+              value={localSearch}
+              onChange={(event) => setLocalSearch(event.target.value)}
+              placeholder={t("librarySearchPlaceholder")}
+            />
+          ) : null}
+          <div className="grid min-h-0 gap-1 pr-1">
             {filteredSongs.map((song) => (
-              <button
-                className={`grid grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-2 rounded-md border p-2 text-left transition ${
+              <div
+                className={`relative grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-1 rounded-md border transition ${
                   song.id === effectiveActiveSongId ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
                 }`}
-                type="button"
                 key={song.id}
-                onClick={() => {
-                  setActiveSongId(song.id);
-                  setEditingSongId(null);
-                  setSelection(null);
-                }}
+                data-song-options-menu="true"
               >
-                {song.albumArtUrl ? (
-                  <Image className="rounded object-cover" src={song.albumArtUrl} alt={t("coverAlt", { title: song.title })} width={28} height={28} />
-                ) : (
-                  <FileText className="text-stone-500" size={17} />
-                )}
-                <span className="min-w-0">
-                  <strong className="block truncate text-sm font-semibold text-stone-950">{song.title}</strong>
-                  <small className="block truncate text-xs text-stone-500">
-                    {t("songListMeta", {
-                      artist: song.artist ?? common("noArtist"),
-                      count: countMarkedTargets(song)
-                    })}
-                  </small>
-                </span>
-              </button>
+                <button
+                  className="grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-2 px-2 py-1.5 text-left"
+                  type="button"
+                  onClick={() => {
+                    setActiveSongId(song.id);
+                    setEditingSongId(null);
+                    closeNoteEditor();
+                    setOpenSongOptionsId(null);
+                    setSelection(null);
+                  }}
+                >
+                  {song.albumArtUrl ? (
+                    <Image className="rounded object-cover" src={song.albumArtUrl} alt={t("coverAlt", { title: song.title })} width={28} height={28} />
+                  ) : (
+                    <FileText className="text-stone-500" size={17} />
+                  )}
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm font-semibold text-stone-950">{song.title}</strong>
+                    <small className="block truncate text-xs text-stone-500">
+                      {t("songListMeta", {
+                        artist: song.artist ?? common("noArtist"),
+                        count: countMarkedTargets(song)
+                      })}
+                    </small>
+                  </span>
+                </button>
+                <button
+                  className={`mr-1 inline-grid size-7 place-items-center rounded-full border bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 ${
+                    openSongOptionsId === `library:${song.id}` ? "border-stone-300 bg-stone-50" : "border-stone-200"
+                  }`}
+                  type="button"
+                  onClick={() => setOpenSongOptionsId((currentId) => (currentId === `library:${song.id}` ? null : `library:${song.id}`))}
+                  aria-expanded={openSongOptionsId === `library:${song.id}`}
+                  aria-haspopup="menu"
+                  aria-label="Song options"
+                  title="Song options"
+                >
+                  <Ellipsis size={15} />
+                </button>
+                {openSongOptionsId === `library:${song.id}` ? (
+                  <div className="absolute right-1 top-9 z-30 w-48 rounded-xl border border-stone-200 bg-white p-1.5" role="menu">
+                    <button
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-stone-700 transition hover:bg-stone-50"
+                      type="button"
+                      onClick={() => {
+                        setOpenSongOptionsId(null);
+                        openSongEditor(song);
+                      }}
+                      role="menuitem"
+                    >
+                      <Pencil size={13} />
+                      {common("edit")}
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-red-700 transition hover:bg-red-50"
+                      type="button"
+                      onClick={() => {
+                        setOpenSongOptionsId(null);
+                        void deleteSong(song);
+                      }}
+                      role="menuitem"
+                    >
+                      <Trash2 size={13} />
+                      {common("delete")}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             ))}
             {filteredSongs.length === 0 ? <p className="text-sm text-stone-500">{t("emptyLibrary")}</p> : null}
           </div>
         </section>
         </div>
 
-        <button
-          className="flex flex-none items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50"
-          type="button"
-          onClick={() => {
-            setProfileDraft({
-              displayName: profile.displayName ?? "",
-              vocalGoal: profile.vocalGoal ?? ""
-            });
-            setProfileError("");
-            setIsProfileModalOpen(true);
-          }}
-        >
-          <span className="grid size-10 flex-none place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.20)]">
-            <UserRound size={18} />
-          </span>
-          <span className="min-w-0">
-            <strong className="block truncate text-sm font-bold text-stone-950">{profileDisplayName}</strong>
-            <small className="block truncate text-xs leading-5 text-stone-500">{profileMeta}</small>
-          </span>
+        <button className={`${primaryButtonClass} w-full flex-none`} type="button" onClick={openManualDraft}>
+          <Plus size={16} />
+          {t("newSong")}
         </button>
+
+        <div className="relative flex flex-none items-center gap-2 border-t border-stone-200 px-1 py-3" data-profile-menu="true">
+          <button
+            className="flex min-w-0 flex-1 items-center gap-3 text-left transition hover:bg-stone-50/70"
+            type="button"
+            onClick={() => {
+              setProfileDraft({
+                displayName: profile.displayName ?? "",
+                vocalGoal: profile.vocalGoal ?? ""
+              });
+              setProfileError("");
+              setIsProfileMenuOpen(false);
+              setIsProfileModalOpen(true);
+            }}
+          >
+            <span className="grid size-10 flex-none place-items-center rounded-xl border border-stone-200 bg-white text-stone-600">
+              <UserRound size={18} />
+            </span>
+            <span className="min-w-0">
+              <strong className="block truncate text-sm font-bold text-stone-950">{profileDisplayName}</strong>
+              <small className="block truncate text-xs leading-5 text-stone-500">{profileMeta}</small>
+            </span>
+          </button>
+          <button
+            className={`inline-grid size-9 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 ${
+              isProfileMenuOpen ? "border-stone-300 bg-stone-50" : "border-stone-200"
+            }`}
+            type="button"
+            onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
+            aria-expanded={isProfileMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Profile menu"
+            title="Profile menu"
+          >
+            <Ellipsis size={18} />
+          </button>
+          {isProfileMenuOpen ? (
+            <div className="absolute bottom-[calc(100%+0.5rem)] right-1 z-30 w-44 rounded-xl border border-stone-200 bg-white p-1.5 shadow-[0_18px_45px_rgba(28,25,23,0.14)]" role="menu">
+              <form action={signOutAction}>
+                <button className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-red-700 transition hover:bg-red-50" type="submit" role="menuitem">
+                  <LogOut size={16} />
+                  {common("signOut")}
+                </button>
+              </form>
+            </div>
+          ) : null}
+        </div>
       </aside>
 
       <section className="relative z-10 min-h-0 min-w-0 overflow-auto px-2 py-4 sm:px-4 lg:px-5">
@@ -2222,6 +2746,63 @@ export function VocalMapApp({
                 </button>
               </div>
             </div>
+
+            {editingSongId === "new" ? (
+              <section className="mb-5 grid gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 sm:p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
+                      <Search size={14} />
+                      {t("musicSearchTitle")}
+                    </p>
+                    <p className="mt-1 text-sm leading-5 text-stone-600">{t("musicSearchHelp")}</p>
+                  </div>
+                  {spotifyResults.length > 0 ? <p className="text-xs font-bold text-emerald-700">{t("searchResultsCount", { count: spotifyResults.length })}</p> : null}
+                </div>
+                <form
+                  className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void searchSpotify();
+                  }}
+                >
+                  <input className={inputClass} value={spotifyQuery} onChange={(event) => setSpotifyQuery(event.target.value)} placeholder={t("musicSearchPlaceholder")} />
+                  <button className={`${secondaryButtonClass} min-h-11 px-4`} type="submit" disabled={isSearchingSpotify}>
+                    {isSearchingSpotify ? <Loader2 className="spin size-4" /> : <Search size={16} />}
+                    {common("search")}
+                  </button>
+                </form>
+                {spotifyMessage ? <p className="text-sm leading-5 text-stone-600">{spotifyMessage}</p> : null}
+                {spotifyResults.length > 0 ? (
+                  <div className="grid max-h-60 gap-2 overflow-auto pr-1 sm:grid-cols-2">
+                    {spotifyResults.map((track) => (
+                      <button
+                        className="grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-white/80 bg-white/85 p-2 text-left transition hover:border-emerald-200 hover:bg-white"
+                        type="button"
+                        key={track.id}
+                        onClick={() => void importSpotifyTrack(track)}
+                      >
+                        {track.albumArtUrl ? (
+                          <Image className="size-11 rounded-lg object-cover" src={track.albumArtUrl} alt={t("coverAlt", { title: track.title })} width={44} height={44} />
+                        ) : (
+                          <div className="grid size-11 place-items-center rounded-lg bg-emerald-100 text-emerald-700">
+                            <Music2 size={17} />
+                          </div>
+                        )}
+                        <span className="min-w-0">
+                          <strong className="block truncate text-sm font-semibold text-stone-950">{track.title}</strong>
+                          <small className="block truncate text-xs text-stone-500">
+                            {track.artist} · {formatDuration(track.durationMs)}
+                            {track.source === "lrclib" ? " · LRCLIB" : ""}
+                          </small>
+                        </span>
+                        {importingTrackId === track.id ? <Loader2 className="spin size-4" /> : <Plus size={15} />}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-semibold text-stone-700">
@@ -2264,52 +2845,7 @@ export function VocalMapApp({
           </div>
         ) : activeSong ? (
           <div>
-            <div className="mx-auto mb-5 flex max-w-6xl flex-col gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.88] p-4 shadow-[0_22px_60px_rgba(0,104,83,0.14)] backdrop-blur-md sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex min-w-0 items-center gap-4">
-                {activeSong.albumArtUrl ? (
-                  <Image className="size-16 flex-none rounded-lg object-cover" src={activeSong.albumArtUrl} alt={t("coverAlt", { title: activeSong.title })} width={64} height={64} />
-                ) : (
-                  <div className="grid size-16 flex-none place-items-center rounded-xl border border-emerald-100 bg-white text-emerald-500">
-                    <Music2 size={24} />
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase text-stone-500">{activeSong.artist ?? common("noArtist")}</p>
-                  <h1 className="mt-1 truncate text-3xl font-bold leading-tight text-stone-950 sm:text-4xl">{activeSong.title}</h1>
-                  <p className="mt-1 text-sm text-stone-500">
-                    {t("linesCount", { count: activeSong.lyrics.length })} · {t("markersCount", { count: countMarkedTargets(activeSong) })}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {activeSong.spotifyUrl ? (
-                  <a className={secondaryButtonClass} href={activeSong.spotifyUrl} target="_blank" rel="noreferrer">
-                    <ExternalLink size={16} />
-                    {common("spotify")}
-                  </a>
-                ) : null}
-                <button className={secondaryButtonClass} type="button" onClick={() => openSongEditor(activeSong)}>
-                  <Pencil size={16} />
-                  {common("edit")}
-                </button>
-                <button className={`${iconButtonClass} text-red-700`} type="button" onClick={() => void deleteSong(activeSong)} title={common("delete")}>
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
-
-            <SongAudioUploader
-              song={activeSong}
-              onUpload={(song, file) => void uploadSongAudio(song, file)}
-              onRemove={(song) => void removeSongAudio(song)}
-              supabase={supabase}
-              labels={{
-                title: t("audioBoxTitle"),
-                help: t("audioBoxHelp"),
-                addFile: t("addAudioFile"),
-                deleteAudio: t("deleteSongAudio")
-              }}
-            />
+            <SpotifyTrackPlayer song={activeSong} title={t("spotifyPlayerTitle", { title: activeSong.title })} />
 
             <div className="mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.94] px-2 py-5 shadow-[0_28px_80px_rgba(0,104,83,0.16)] backdrop-blur-md sm:px-4 sm:py-8">
               {activeSong.lyrics.length === 0 || activeSong.lyrics.every((line) => line.text.trim().length === 0) ? (
@@ -2323,7 +2859,7 @@ export function VocalMapApp({
                     key={line.id}
                     line={line}
                     songId={activeSong.id}
-                    onSelect={(target) => setSelection(target)}
+                    onLineSelect={selectLineFromSide}
                     onWordPointerDown={beginWordSelection}
                     onWordPointerMove={updateWordSelectionFromPointer}
                     onWordPointerUp={finishWordSelection}
@@ -2336,7 +2872,8 @@ export function VocalMapApp({
                     labels={{
                       emptyLine: common("emptyLine"),
                       lineAudio: t("lineAudioTitle"),
-                      wordAudio: t("wordAudioTitle")
+                      wordAudio: t("wordAudioTitle"),
+                      note: t("noteTitle")
                     }}
                   />
                 ))
@@ -2360,8 +2897,213 @@ export function VocalMapApp({
         )}
       </section>
 
+      {isSettingsOpen ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-stone-950/30 px-4 py-6 backdrop-blur-sm">
+          <section className="grid h-[calc(100dvh-3rem)] max-h-[54rem] w-full max-w-4xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-2xl border border-stone-200 bg-white">
+            <div className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-stone-950">Settings</h2>
+                <p className="mt-0.5 text-xs text-stone-500">Manage workspace preferences.</p>
+              </div>
+              <button
+                className="inline-grid size-8 flex-none place-items-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-950"
+                type="button"
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                  setIsMarkerFormOpen(false);
+                  setEditingMarkerId(null);
+                  setSelectedMarkerId(null);
+                }}
+                title={common("close")}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="grid min-h-0 grid-cols-1 md:grid-cols-[14rem_minmax(0,1fr)]">
+              <nav className="flex overflow-x-auto border-b border-stone-200 bg-white md:block md:overflow-visible md:border-b-0 md:border-r">
+                <button className="flex min-w-48 items-center justify-between gap-3 border-r border-stone-200 bg-emerald-50/50 px-3 py-3 text-left md:w-full md:border-b md:border-r-0" type="button">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="grid size-7 flex-none place-items-center rounded-lg bg-emerald-50 text-emerald-700">
+                      <Sparkles size={14} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-stone-950">{t("markerPanelTitle")}</span>
+                      <span className="block truncate text-xs text-stone-500">{t("markerCount", { count: visibleMarkers.length })}</span>
+                    </span>
+                  </span>
+                </button>
+              </nav>
+
+              <div className="min-h-0 overflow-auto">
+                <div className="grid divide-y divide-stone-200">
+                  <div className="flex items-center justify-between gap-3 p-4">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-stone-950">{t("markerPanelTitle")}</h3>
+                      <p className="mt-1 text-xs leading-5 text-stone-500">{t("markerPanelHint")}</p>
+                    </div>
+                    <button
+                      className="inline-flex h-7 flex-none items-center justify-center gap-1 rounded-full bg-emerald-600 px-2.5 text-[0.6875rem] font-semibold text-white transition hover:bg-emerald-700"
+                      type="button"
+                      onClick={openMarkerCreate}
+                    >
+                      <Plus size={12} />
+                      {t("markerAddAction")}
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1 p-4">
+                    {visibleMarkers.map((marker) => {
+                      const Icon = markerIcons[marker.icon];
+                      const isSelected = selectedMarkerId === marker.id;
+                      return (
+                        <button
+                          className={`inline-flex min-h-6 max-w-full items-center gap-1 rounded-full border px-2 text-[0.6875rem] font-medium leading-none transition ${
+                            isSelected ? "ring-1 ring-emerald-300 ring-offset-1 ring-offset-white" : ""
+                          }`}
+                          type="button"
+                          key={marker.id}
+                          style={makeMarkerStyle(marker)}
+                          onClick={() => {
+                            setSelectedMarkerId((currentId) => (currentId === marker.id ? null : marker.id));
+                            setIsMarkerFormOpen(false);
+                            setEditingMarkerId(null);
+                          }}
+                          title={marker.meaning}
+                          aria-pressed={isSelected}
+                        >
+                          <Icon size={10} strokeWidth={2.2} />
+                          <span className="truncate">{marker.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedMarker && !isMarkerFormOpen ? (
+                    <div className="grid gap-2 bg-stone-50/70 p-4">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="size-3 flex-none rounded-full" style={{ backgroundColor: selectedMarker.color }} />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-stone-950">{selectedMarker.label}</p>
+                          <p className="truncate text-xs leading-5 text-stone-500">{selectedMarker.meaning}</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="button" onClick={() => openMarkerEdit(selectedMarker)}>
+                          <Pencil size={13} />
+                          {common("edit")}
+                        </button>
+                        <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs text-red-700 hover:border-red-200 hover:bg-red-50`} type="button" onClick={() => void removeMarker(selectedMarker.id)}>
+                          <Trash2 size={13} />
+                          {selectedMarker.isSystem ? t("markerHide") : common("delete")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {hiddenSystemMarkerIds.size > 0 || Object.keys(systemMarkerOverrides).length > 0 ? (
+                    <button className="justify-self-start p-4 text-xs font-semibold text-emerald-700 transition hover:text-emerald-900" type="button" onClick={resetSystemMarkers}>
+                      {t("markerResetDefaults")}
+                    </button>
+                  ) : null}
+
+                  {isMarkerFormOpen ? (
+                    <form className="grid gap-2.5 bg-white p-4" onSubmit={(event) => void saveMarker(event)}>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[0.6875rem] font-semibold uppercase text-stone-500">{editingMarkerId ? t("markerEditTitle") : t("markerCreateTitle")}</p>
+                        <button className="inline-grid size-7 place-items-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-950" type="button" onClick={closeMarkerForm} title={common("close")}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <input
+                          className={`${inputClass} h-9 rounded-xl px-3 text-sm`}
+                          value={customMarkerDraft.label}
+                          onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, label: event.target.value }))}
+                          placeholder={t("markerNamePlaceholder")}
+                          maxLength={14}
+                        />
+                        <input
+                          className={`${inputClass} h-9 rounded-xl px-3 text-sm`}
+                          value={customMarkerDraft.meaning}
+                          onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, meaning: event.target.value }))}
+                          placeholder={t("markerMeaningPlaceholder")}
+                        />
+                      </div>
+                      <div className="grid gap-2 rounded-xl border border-stone-200 bg-stone-50/70 p-2">
+                        <div className="flex items-center gap-2">
+                          <label className="relative grid size-9 flex-none cursor-pointer place-items-center overflow-hidden rounded-xl border border-stone-200 bg-white p-1" title={t("markerColorTitle")}>
+                            <span className="size-full rounded-lg" style={{ backgroundColor: customMarkerDraft.color }} />
+                            <input
+                              className="absolute inset-0 cursor-pointer opacity-0"
+                              type="color"
+                              value={customMarkerDraft.color}
+                              onChange={(event) => setCustomMarkerDraft((current) => ({ ...current, color: event.target.value }))}
+                              aria-label={t("markerColorTitle")}
+                            />
+                          </label>
+                          <span
+                            className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border bg-white px-2.5 py-1.5 text-xs font-medium"
+                            style={{
+                              color: customMarkerDraft.color,
+                              borderColor: `${customMarkerDraft.color}55`,
+                              backgroundColor: `${customMarkerDraft.color}10`
+                            }}
+                          >
+                            {(() => {
+                              const Icon = markerIcons[customMarkerDraft.icon];
+                              return <Icon size={14} strokeWidth={2.2} />;
+                            })()}
+                            <span className="truncate">{customMarkerDraft.label.trim() || t("markerNamePlaceholder")}</span>
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-7 gap-1 sm:flex sm:flex-wrap" role="radiogroup" aria-label="Marker icon">
+                          {MARKER_ICON_OPTIONS.map((option) => {
+                            const Icon = markerIcons[option.value];
+                            const isIconSelected = customMarkerDraft.icon === option.value;
+
+                            return (
+                              <button
+                                className={`grid size-7 place-items-center rounded-lg border transition hover:border-stone-300 hover:bg-white ${
+                                  isIconSelected ? "border-stone-800 bg-white ring-1 ring-stone-200" : "border-stone-200 bg-stone-50"
+                                }`}
+                                type="button"
+                                key={option.value}
+                                onClick={() => setCustomMarkerDraft((current) => ({ ...current, icon: option.value }))}
+                                role="radio"
+                                aria-checked={isIconSelected}
+                                aria-label={markerIconLabels(option.value)}
+                                title={markerIconLabels(option.value)}
+                              >
+                                <Icon size={14} strokeWidth={2.2} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button className={`${secondaryButtonClass} min-h-9 rounded-xl px-3 py-1.5 text-sm font-medium`} type="button" onClick={closeMarkerForm}>
+                          {common("cancel")}
+                        </button>
+                        <button className={`${primaryButtonClass} min-h-9 rounded-xl px-3 py-1.5 text-sm font-medium`} type="submit">
+                          {editingMarkerId ? t("markerUpdate") : common("add")}
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {selection && selectedData && !isSelectingWords ? (
-        <div className="fixed z-20 w-[min(23.25rem,calc(100vw-1.5rem))] rounded-lg border border-stone-200 bg-white/95 p-3 shadow-2xl backdrop-blur" style={popoverStyle}>
+        <div
+          className="fixed z-20 w-[min(23.25rem,calc(100vw-1.5rem))] rounded-lg border border-stone-200 bg-white/95 p-3 backdrop-blur"
+          data-marker-popover="true"
+          style={popoverStyle}
+        >
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase text-stone-500">{selectedData.type === "line" ? t("selectedLine") : selectedData.type === "range" ? t("selectedRange") : t("selectedWord")}</p>
@@ -2370,19 +3112,34 @@ export function VocalMapApp({
               </strong>
               {selectedData.type === "range" ? <span className="block truncate text-xs leading-5 text-stone-500">{selectedData.label}</span> : null}
             </div>
-            <button className={`${iconButtonClass} size-8 border-transparent`} type="button" onClick={() => setSelection(null)} title={common("close")}>
+            <button
+              className={`${iconButtonClass} size-8 border-transparent`}
+              type="button"
+              onClick={() => {
+                closeNoteEditor();
+                setSelection(null);
+              }}
+              title={common("close")}
+            >
               <X size={15} />
             </button>
           </div>
 
-          <div className="grid max-h-56 grid-cols-2 gap-1.5 overflow-auto pr-1 sm:grid-cols-4">
+          {currentNoteText() ? (
+            <div className="mb-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-stone-800">
+              <StickyNote className="mt-0.5 flex-none text-amber-700" size={13} />
+              <p className="min-w-0 whitespace-pre-wrap break-words">{currentNoteText()}</p>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-1">
             {visibleMarkers.map((marker) => {
               const Icon = markerIcons[marker.icon];
               const active = selectedData.annotations.some((annotation) => annotation.markerId === marker.id);
 
               return (
                 <button
-                  className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-bold transition ${active ? "ring-2 ring-offset-1" : ""}`}
+                  className={`inline-flex min-h-6 max-w-full items-center gap-1 rounded-full border px-2 text-[0.6875rem] font-medium leading-none transition ${active ? "ring-1 ring-offset-1" : ""}`}
                   type="button"
                   key={marker.id}
                   style={makeMarkerStyle(marker)}
@@ -2390,39 +3147,73 @@ export function VocalMapApp({
                   aria-pressed={active}
                   title={active ? t("markerActiveTitle", { meaning: marker.meaning }) : t("markerInactiveTitle", { meaning: marker.meaning })}
                 >
-                  <Icon size={14} strokeWidth={2.4} />
+                  <Icon size={10} strokeWidth={2.2} />
                   <span className="truncate">{marker.label}</span>
                 </button>
               );
             })}
           </div>
 
-          {selectedData.type !== "range" ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-3">
-              {recordingTarget === currentTargetKey ? (
-                <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800" type="button" onClick={stopRecording}>
-                  <Square size={15} fill="currentColor" />
-                  {common("stop")}
-                </button>
-              ) : (
-                <button className={secondaryButtonClass} type="button" onClick={() => void startRecording()}>
-                  <Mic size={15} />
-                  {common("recordAudio")}
-                </button>
-              )}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-3">
+            {selectedData.type !== "range" ? (
+              <>
+                {recordingTarget === currentTargetKey ? (
+                  <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800" type="button" onClick={stopRecording}>
+                    <Square size={15} fill="currentColor" />
+                    {common("stop")}
+                  </button>
+                ) : (
+                  <button className={secondaryButtonClass} type="button" onClick={() => void startRecording()}>
+                    <Mic size={15} />
+                    {common("recordAudio")}
+                  </button>
+                )}
 
-              {selectedData.audioReference ? (
-                <>
-                  <button className={secondaryButtonClass} type="button" onClick={() => void playAudioReference(selectedData.audioReference!)}>
-                    <Play size={15} fill="currentColor" />
-                    {common("play")}
+                {selectedData.audioReference ? (
+                  <>
+                    <button className={secondaryButtonClass} type="button" onClick={() => void playAudioReference(selectedData.audioReference!)}>
+                      <Play size={15} fill="currentColor" />
+                      {common("play")}
+                    </button>
+                    <button className={`${iconButtonClass} text-red-700`} type="button" onClick={() => void removeAudioReferenceFromSelection()} title={common("delete")}>
+                      <Trash2 size={15} />
+                    </button>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+
+            <button className={secondaryButtonClass} type="button" onClick={openNoteEditor}>
+              <StickyNote size={15} />
+              {hasSelectedTextNote() ? t("editNote") : t("addNote")}
+            </button>
+          </div>
+
+          {isNoteEditorOpen ? (
+            <form className="mt-3 grid gap-2 border-t border-stone-200 pt-3" onSubmit={(event) => void saveTextNote(event)}>
+              <textarea
+                className="min-h-24 w-full resize-y rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm leading-5 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                value={noteDraft}
+                onChange={(event) => setNoteDraft(event.target.value)}
+                placeholder={t("notePlaceholder")}
+                maxLength={800}
+                autoFocus
+              />
+              <div className="flex flex-wrap justify-end gap-2">
+                {hasSelectedTextNote() ? (
+                  <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs text-red-700 hover:border-red-200 hover:bg-red-50`} type="button" onClick={() => void deleteTextNoteFromSelection()}>
+                    <Trash2 size={13} />
+                    {common("delete")}
                   </button>
-                  <button className={`${iconButtonClass} text-red-700`} type="button" onClick={() => void removeAudioReferenceFromSelection()} title={common("delete")}>
-                    <Trash2 size={15} />
-                  </button>
-                </>
-              ) : null}
-            </div>
+                ) : null}
+                <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="button" onClick={() => setIsNoteEditorOpen(false)}>
+                  {common("cancel")}
+                </button>
+                <button className={`${primaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="submit">
+                  {common("save")}
+                </button>
+              </div>
+            </form>
           ) : null}
         </div>
       ) : null}

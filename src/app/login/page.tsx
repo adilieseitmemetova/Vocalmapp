@@ -1,6 +1,7 @@
 import { AudioLines } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { EmailCodeForm } from "@/components/EmailCodeForm";
 import { createClient } from "@/lib/supabase/server";
@@ -37,7 +38,9 @@ export default async function LoginPage() {
         <div className="w-full rounded-[1.5rem] bg-white p-6 text-center shadow-[0_30px_90px_rgba(0,104,83,0.26)] ring-1 ring-emerald-950/5 sm:p-8">
           <h1 className="text-2xl font-bold leading-tight text-stone-950 sm:text-[1.7rem]">{t("title")}</h1>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-stone-500">{t("subtitle")}</p>
-          <EmailCodeForm />
+          <Suspense>
+            <EmailCodeForm />
+          </Suspense>
         </div>
       </section>
     </main>

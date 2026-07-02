@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DEFAULT_MARKERS } from "@/markers";
 import type { Database, Tables } from "@/lib/database.types";
-import type { AudioReference, InitialVocalMapData, LineAnnotation, LyricLine, LyricWord, Marker, MarkerIconName, Song, WordAnnotation } from "@/types";
+import type { AudioReference, InitialVocalMapData, LineAnnotation, LyricLine, LyricWord, Marker, MarkerIconName, Song, TextNote, WordAnnotation } from "@/types";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 type SongRow = Tables<"songs">;
@@ -10,6 +10,7 @@ type LineRow = Tables<"lyric_lines">;
 type WordRow = Tables<"lyric_words">;
 type AnnotationRow = Tables<"annotations">;
 type AudioRow = Tables<"audio_references">;
+type TextNoteRow = Tables<"target_notes">;
 type MarkerRow = Tables<"markers">;
 
 const markerIcons = new Set<MarkerIconName>([
@@ -26,7 +27,52 @@ const markerIcons = new Set<MarkerIconName>([
   "repeat",
   "spark",
   "volume",
-  "mute"
+  "mute",
+  "waveform",
+  "waves",
+  "mic",
+  "music",
+  "ear",
+  "headphones",
+  "timer",
+  "activity",
+  "gauge",
+  "zap",
+  "smile",
+  "frown",
+  "up-right",
+  "down-right",
+  "chevrons-up",
+  "chevrons-down",
+  "mic-vocal",
+  "podcast",
+  "radio",
+  "volume-low",
+  "volume-off",
+  "audio-lines",
+  "chart-up",
+  "chart-down",
+  "signal-high",
+  "signal-low",
+  "move-vertical",
+  "arrow-up-down",
+  "arrow-left-right",
+  "refresh",
+  "rotate",
+  "undo",
+  "redo",
+  "corner-up-right",
+  "corner-down-right",
+  "spline",
+  "blend",
+  "layers",
+  "brackets",
+  "braces",
+  "hash",
+  "equal",
+  "tally-1",
+  "tally-2",
+  "tally-3"
 ]);
 
 function requireData<T>(result: { data: T | null; error: { message: string } | null }) {
@@ -35,6 +81,18 @@ function requireData<T>(result: { data: T | null; error: { message: string } | n
   }
 
   return result.data ?? ([] as T);
+}
+
+function optionalTargetNotes(result: { data: TextNoteRow[] | null; error: { message: string } | null }) {
+  if (result.error) {
+    const message = result.error.message.toLowerCase();
+    if (message.includes("target_notes") || message.includes("schema cache")) {
+      return [];
+    }
+    throw new Error(result.error.message);
+  }
+
+  return result.data ?? [];
 }
 
 function toMarker(row: MarkerRow): Marker {
@@ -60,13 +118,23 @@ function toAudioReference(row: AudioRow): AudioReference {
   };
 }
 
+function toTextNote(row: TextNoteRow): TextNote {
+  return {
+    id: row.id,
+    text: row.text,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId: string): Promise<InitialVocalMapData> {
-  const [songsResult, linesResult, wordsResult, annotationsResult, audioResult, markersResult] = await Promise.all([
+  const [songsResult, linesResult, wordsResult, annotationsResult, audioResult, notesResult, markersResult] = await Promise.all([
     supabase.from("songs").select("*").eq("user_id", userId).order("updated_at", { ascending: false }),
     supabase.from("lyric_lines").select("*").eq("user_id", userId).order("position", { ascending: true }),
     supabase.from("lyric_words").select("*").eq("user_id", userId).order("position", { ascending: true }),
     supabase.from("annotations").select("*").eq("user_id", userId),
-    supabase.from("audio_references").select("*").eq("user_id", userId),
+    supabase.from("audio_references").select("*").eq("user_id", userId).order("created_at", { ascending: true }),
+    supabase.from("target_notes").select("*").eq("user_id", userId),
     supabase.from("markers").select("*").order("sort_order", { ascending: true })
   ]);
 
@@ -75,6 +143,7 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
   const wordRows = requireData<WordRow[]>(wordsResult);
   const annotationRows = requireData<AnnotationRow[]>(annotationsResult);
   const audioRows = requireData<AudioRow[]>(audioResult);
+  const noteRows = optionalTargetNotes(notesResult);
   const markerRows = requireData<MarkerRow[]>(markersResult);
 
   const wordsByLine = new Map<string, WordRow[]>();
@@ -100,16 +169,28 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
     }
   }
 
-  const audioBySong = new Map<string, AudioReference>();
+  const audioBySong = new Map<string, AudioReference[]>();
   const audioByLine = new Map<string, AudioReference>();
   const audioByWord = new Map<string, AudioReference>();
   for (const audio of audioRows) {
     if (audio.target_type === "song") {
-      audioBySong.set(audio.song_id, toAudioReference(audio));
+      const references = audioBySong.get(audio.song_id) ?? [];
+      references.push(toAudioReference(audio));
+      audioBySong.set(audio.song_id, references);
     } else if (audio.target_type === "line" && audio.line_id) {
       audioByLine.set(audio.line_id, toAudioReference(audio));
     } else if (audio.target_type === "word" && audio.word_id) {
       audioByWord.set(audio.word_id, toAudioReference(audio));
+    }
+  }
+
+  const notesByLine = new Map<string, TextNote>();
+  const notesByWord = new Map<string, TextNote>();
+  for (const note of noteRows) {
+    if (note.target_type === "line" && note.line_id) {
+      notesByLine.set(note.line_id, toTextNote(note));
+    } else if (note.target_type === "word" && note.word_id) {
+      notesByWord.set(note.word_id, toTextNote(note));
     }
   }
 
@@ -119,7 +200,8 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
       id: word.id,
       text: word.text,
       annotations: annotationsByWord.get(word.id) ?? [],
-      audioReference: audioByWord.get(word.id)
+      audioReference: audioByWord.get(word.id),
+      textNote: notesByWord.get(word.id)
     }));
 
     const lines = linesBySong.get(line.song_id) ?? [];
@@ -128,7 +210,8 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
       text: line.text,
       words,
       annotations: annotationsByLine.get(line.id) ?? [],
-      audioReference: audioByLine.get(line.id)
+      audioReference: audioByLine.get(line.id),
+      textNote: notesByLine.get(line.id)
     });
     linesBySong.set(line.song_id, lines);
   }
@@ -143,7 +226,7 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
     spotifyUrl: song.spotify_url ?? undefined,
     lyrics: linesBySong.get(song.id) ?? [],
     sourceLyricsText: song.source_lyrics_text,
-    songAudio: audioBySong.get(song.id),
+    songAudios: audioBySong.get(song.id) ?? [],
     durationMs: song.duration_ms ?? undefined,
     createdAt: song.created_at,
     updatedAt: song.updated_at

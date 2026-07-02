@@ -90,6 +90,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      target_notes: {
+        Row: {
+          created_at: string;
+          id: string;
+          line_id: string | null;
+          song_id: string;
+          target_type: Database["public"]["Enums"]["note_target_type"];
+          text: string;
+          updated_at: string;
+          user_id: string;
+          word_id: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          line_id?: string | null;
+          song_id: string;
+          target_type: Database["public"]["Enums"]["note_target_type"];
+          text: string;
+          updated_at?: string;
+          user_id: string;
+          word_id?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          line_id?: string | null;
+          song_id?: string;
+          target_type?: Database["public"]["Enums"]["note_target_type"];
+          text?: string;
+          updated_at?: string;
+          user_id?: string;
+          word_id?: string | null;
+        };
+        Relationships: [];
+      };
       lyric_lines: {
         Row: {
           created_at: string;
@@ -273,6 +309,7 @@ export type Database = {
     Enums: {
       annotation_target_type: "line" | "word";
       audio_target_type: "song" | "line" | "word";
+      note_target_type: "line" | "word";
     };
     CompositeTypes: Record<string, never>;
   };
@@ -290,7 +327,8 @@ export const Constants = {
   public: {
     Enums: {
       annotation_target_type: ["line", "word"],
-      audio_target_type: ["song", "line", "word"]
+      audio_target_type: ["song", "line", "word"],
+      note_target_type: ["line", "word"]
     }
   }
 } as const;

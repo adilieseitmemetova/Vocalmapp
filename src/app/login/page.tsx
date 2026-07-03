@@ -1,4 +1,4 @@
-import { AudioLines } from "lucide-react";
+import Image from "next/image";
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -28,11 +28,15 @@ export default async function LoginPage() {
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(220,255,246,0.18),rgba(35,181,156,0.08)_42%,rgba(12,130,111,0.22)_100%)]" />
       <section className="relative z-10 flex w-full max-w-[32rem] flex-col items-center gap-6">
-        <div className="flex items-center gap-3 text-white drop-shadow-[0_4px_18px_rgba(0,122,98,0.35)]">
-          <span className="grid size-10 place-items-center rounded-[0.8rem] bg-white/20 text-white ring-1 ring-white/35 backdrop-blur-md">
-            <AudioLines size={21} strokeWidth={2.5} />
-          </span>
-          <span className="text-4xl font-bold leading-none tracking-[0.02em] sm:text-5xl">{common("appName")}</span>
+        <div className="grid h-16 w-56 place-items-center">
+          <Image
+            className="h-auto w-full"
+            src="/images/vocalmap-logo.svg"
+            alt={common("appName")}
+            width={351}
+            height={102}
+            priority
+          />
         </div>
 
         <div className="w-full rounded-[1.5rem] bg-white p-6 text-center shadow-[0_30px_90px_rgba(0,104,83,0.26)] ring-1 ring-emerald-950/5 sm:p-8">

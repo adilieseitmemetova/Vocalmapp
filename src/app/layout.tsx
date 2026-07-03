@@ -28,7 +28,7 @@ export default async function RootLayout({
   const common = await getTranslations("common");
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html lang={locale} data-scroll-behavior="smooth" suppressHydrationWarning>
       <body>
         <NextIntlClientProvider messages={messages}>
           <a className="skip-link" href="#main-content">

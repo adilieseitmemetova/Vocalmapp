@@ -33,11 +33,15 @@ export function AuthCallbackClient() {
       const next = safeNextPath(searchParams.get("next") ?? sessionStorage.getItem(authNextStorageKey));
 
       async function redirectIfSessionExists() {
-        const {
-          data: { session }
-        } = await supabase.auth.getSession();
+        let hasSession = false;
+        try {
+          const { data } = await supabase.auth.getSession();
+          hasSession = Boolean(data.session);
+        } catch {
+          return false;
+        }
 
-        if (!session) {
+        if (!hasSession) {
           return false;
         }
 
@@ -67,7 +71,12 @@ export function AuthCallbackClient() {
         return;
       }
 
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      let error: unknown = null;
+      try {
+        ({ error } = await supabase.auth.exchangeCodeForSession(code));
+      } catch (authError) {
+        error = authError;
+      }
       if (cancelled) {
         return;
       }

@@ -97,12 +97,17 @@ export function EmailCodeForm() {
     setStatus("sending");
     setMessage("");
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email: targetEmail,
-      options: {
-        shouldCreateUser: true
-      }
-    });
+    let error: unknown = null;
+    try {
+      ({ error } = await supabase.auth.signInWithOtp({
+        email: targetEmail,
+        options: {
+          shouldCreateUser: true
+        }
+      }));
+    } catch (authError) {
+      error = authError;
+    }
 
     if (error) {
       logAuthError("signInWithOtp", error);
@@ -138,12 +143,17 @@ export function EmailCodeForm() {
     sessionStorage.setItem(authNextStorageKey, next);
     const redirectTo = `${window.location.origin}/auth/callback`;
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo
-      }
-    });
+    let error: unknown = null;
+    try {
+      ({ error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo
+        }
+      }));
+    } catch (authError) {
+      error = authError;
+    }
 
     if (error) {
       logAuthError("signInWithOAuth", error, { provider: "google" });
@@ -165,11 +175,16 @@ export function EmailCodeForm() {
     setStatus("verifying");
     setMessage("");
 
-    const { error } = await supabase.auth.verifyOtp({
-      email: confirmedEmail,
-      token: normalizedCode,
-      type: "email"
-    });
+    let error: unknown = null;
+    try {
+      ({ error } = await supabase.auth.verifyOtp({
+        email: confirmedEmail,
+        token: normalizedCode,
+        type: "email"
+      }));
+    } catch (authError) {
+      error = authError;
+    }
 
     if (error) {
       logAuthError("verifyOtp", error, { type: "email" });

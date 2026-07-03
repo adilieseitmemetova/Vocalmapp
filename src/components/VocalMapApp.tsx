@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  AudioLines,
   Ellipsis,
   ExternalLink,
   FileText,
@@ -10,6 +9,8 @@ import {
   LogOut,
   Mic,
   Music2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Play,
   Plus,
@@ -62,6 +63,18 @@ const AUDIO_BUCKET = "vocalmap-audio";
 const PROFILE_STORAGE_KEY = "vocalmapp:profile:v1";
 const MARKER_PREFERENCES_STORAGE_PREFIX = "vocalmapp:marker-preferences";
 const TEXT_NOTES_STORAGE_PREFIX = "vocalmapp:text-notes";
+const LYRIC_TEXT_SIZE_STORAGE_PREFIX = "vocalmapp:lyric-text-size";
+const LYRIC_LINE_SPACING_STORAGE_PREFIX = "vocalmapp:lyric-line-spacing";
+const LYRIC_WORD_SPACING_STORAGE_PREFIX = "vocalmapp:lyric-word-spacing";
+const DEFAULT_LYRIC_TEXT_SIZE = 24;
+const MIN_LYRIC_TEXT_SIZE = 16;
+const MAX_LYRIC_TEXT_SIZE = 36;
+const DEFAULT_LYRIC_LINE_SPACING = 8;
+const MIN_LYRIC_LINE_SPACING = 0;
+const MAX_LYRIC_LINE_SPACING = 24;
+const DEFAULT_LYRIC_WORD_SPACING = 8;
+const MIN_LYRIC_WORD_SPACING = 0;
+const MAX_LYRIC_WORD_SPACING = 24;
 
 const EMPTY_DRAFT: SongDraft = {
   title: "",
@@ -81,6 +94,7 @@ type MarkerPreferences = {
   hiddenSystemMarkerIds: string[];
   systemOverrides: Record<string, MarkerDraft>;
 };
+type SettingsPanel = "markers" | "lyrics";
 type StoredTextNote = {
   id: string;
   songId: string;
@@ -140,6 +154,30 @@ function createId() {
 
 function textNotesStorageKey(userId: string) {
   return `${TEXT_NOTES_STORAGE_PREFIX}:${userId}`;
+}
+
+function lyricTextSizeStorageKey(userId: string) {
+  return `${LYRIC_TEXT_SIZE_STORAGE_PREFIX}:${userId}`;
+}
+
+function lyricLineSpacingStorageKey(userId: string) {
+  return `${LYRIC_LINE_SPACING_STORAGE_PREFIX}:${userId}`;
+}
+
+function lyricWordSpacingStorageKey(userId: string) {
+  return `${LYRIC_WORD_SPACING_STORAGE_PREFIX}:${userId}`;
+}
+
+function clampLyricTextSize(size: number) {
+  return Math.min(MAX_LYRIC_TEXT_SIZE, Math.max(MIN_LYRIC_TEXT_SIZE, Math.round(size)));
+}
+
+function clampLyricLineSpacing(spacing: number) {
+  return Math.min(MAX_LYRIC_LINE_SPACING, Math.max(MIN_LYRIC_LINE_SPACING, Math.round(spacing)));
+}
+
+function clampLyricWordSpacing(spacing: number) {
+  return Math.min(MAX_LYRIC_WORD_SPACING, Math.max(MIN_LYRIC_WORD_SPACING, Math.round(spacing)));
 }
 
 function textNoteTargetKey(note: Pick<StoredTextNote, "songId" | "lineId" | "wordId" | "targetType">) {
@@ -720,6 +758,9 @@ function LyricsLine({
   markerById,
   selectedLineId,
   selectedWordIds,
+  lyricTextStyle,
+  lyricLineStyle,
+  lyricWordsStyle,
   labels
 }: {
   line: LyricLine;
@@ -734,6 +775,9 @@ function LyricsLine({
   markerById: Map<string, Marker>;
   selectedLineId: string | null;
   selectedWordIds: Set<string>;
+  lyricTextStyle: CSSProperties;
+  lyricLineStyle: CSSProperties;
+  lyricWordsStyle: CSSProperties;
   labels: {
     emptyLine: string;
     lineAudio: string;
@@ -747,9 +791,10 @@ function LyricsLine({
   return (
     <div
       data-lyric-selection-surface="true"
-      className={`grid min-h-12 cursor-pointer grid-cols-1 gap-1 rounded-xl border px-3 py-2 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
+      className={`grid cursor-pointer grid-cols-1 gap-1 rounded-xl border px-3 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
         lineIsSelected || lineHasRangeSelection ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
       }`}
+      style={lyricLineStyle}
       onClick={(event) => onLineSelect(line.id, event.currentTarget)}
     >
       <div className="flex flex-wrap items-start gap-1 pt-0.5 lg:justify-end">
@@ -759,9 +804,9 @@ function LyricsLine({
         {line.audioReference ? <AudioDot onPlay={() => onPlayAudio(line.audioReference!)} title={labels.lineAudio} /> : null}
         {line.textNote ? <NoteDot note={line.textNote} title={labels.note} /> : null}
       </div>
-      <div className="flex min-w-0 flex-wrap items-start gap-x-0 gap-y-1 text-xl leading-relaxed text-stone-950 sm:text-2xl">
+      <div className="flex min-w-0 flex-wrap items-start gap-y-1 text-stone-950" style={{ ...lyricTextStyle, ...lyricWordsStyle }}>
         {line.words.length === 0 ? (
-          <span className="text-sm text-stone-400">{labels.emptyLine}</span>
+          <span className="min-h-[1.7em]" aria-hidden="true" />
         ) : (
           line.words.map((word, wordIndex) => {
             const wordIsSelected = selectedWordIds.has(word.id);
@@ -878,10 +923,10 @@ function SongMenuCard({
   };
 }) {
   return (
-    <section className="relative grid gap-3 py-1">
+    <section className="relative grid gap-3 border-t border-stone-200 pt-3 pb-1">
       <div className="relative aspect-square overflow-hidden rounded-xl border border-stone-200 bg-stone-100">
         {song.albumArtUrl ? (
-          <Image className="size-full object-cover" src={song.albumArtUrl} alt={labels.coverAlt} width={640} height={640} />
+          <Image className="size-full object-cover" src={song.albumArtUrl} alt={labels.coverAlt} width={640} height={640} priority loading="eager" />
         ) : (
           <div className="grid size-full place-items-center bg-stone-50 text-stone-500">
             <Music2 size={28} />
@@ -1015,7 +1060,9 @@ export function VocalMapApp({
   const [songs, setSongs] = useState<Song[]>(initialData.songs);
   const [markers, setMarkers] = useState<Marker[]>(translatedInitialMarkers);
   const [customMarkerDraft, setCustomMarkerDraft] = useState(EMPTY_CUSTOM_MARKER);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeSettingsPanel, setActiveSettingsPanel] = useState<SettingsPanel>("markers");
   const [isMarkerFormOpen, setIsMarkerFormOpen] = useState(false);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
@@ -1026,6 +1073,7 @@ export function VocalMapApp({
   const [isLibrarySearchOpen, setIsLibrarySearchOpen] = useState(false);
   const [draft, setDraft] = useState<SongDraft>(EMPTY_DRAFT);
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
+  const [pendingSongAudioFile, setPendingSongAudioFile] = useState<File | null>(null);
   const [selection, setSelection] = useState<LyricsSelection | null>(null);
   const [isSelectingWords, setIsSelectingWords] = useState(false);
   const [spotifyQuery, setSpotifyQuery] = useState("");
@@ -1036,6 +1084,9 @@ export function VocalMapApp({
   const [recordingTarget, setRecordingTarget] = useState("");
   const [isNoteEditorOpen, setIsNoteEditorOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
+  const [lyricTextSize, setLyricTextSize] = useState(DEFAULT_LYRIC_TEXT_SIZE);
+  const [lyricLineSpacing, setLyricLineSpacing] = useState(DEFAULT_LYRIC_LINE_SPACING);
+  const [lyricWordSpacing, setLyricWordSpacing] = useState(DEFAULT_LYRIC_WORD_SPACING);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [hasLocalData, setHasLocalData] = useState(false);
@@ -1108,6 +1159,16 @@ export function VocalMapApp({
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       setHasLocalData(Boolean(localStorage.getItem("vocalmap:songs:v1") ?? localStorage.getItem("vocal-song-markup:songs:v1")));
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      if (window.matchMedia("(max-width: 767px)").matches) {
+        setIsSidebarCollapsed(true);
+      }
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
@@ -1201,6 +1262,27 @@ export function VocalMapApp({
   }, [userId]);
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const storedSize = Number(localStorage.getItem(lyricTextSizeStorageKey(userId)));
+      if (Number.isFinite(storedSize)) {
+        setLyricTextSize(clampLyricTextSize(storedSize));
+      }
+
+      const storedSpacing = Number(localStorage.getItem(lyricLineSpacingStorageKey(userId)));
+      if (Number.isFinite(storedSpacing)) {
+        setLyricLineSpacing(clampLyricLineSpacing(storedSpacing));
+      }
+
+      const storedWordSpacing = Number(localStorage.getItem(lyricWordSpacingStorageKey(userId)));
+      if (Number.isFinite(storedWordSpacing)) {
+        setLyricWordSpacing(clampLyricWordSpacing(storedWordSpacing));
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [userId]);
+
+  useEffect(() => {
     if (isLibrarySearchOpen) {
       librarySearchInputRef.current?.focus();
     }
@@ -1215,6 +1297,28 @@ export function VocalMapApp({
   const selectedWordIds = useMemo(() => new Set(activeSong ? selectedWordAddresses(activeSong, selection).map((address) => address.word.id) : []), [activeSong, selection]);
   const selectedLineId = selection?.type === "line" ? selection.lineId : null;
   const currentTargetKey = selectedTargetKey(selection);
+  const songDraftIsComplete = Boolean(draft.title.trim() && draft.artist.trim() && draft.lyricsText.trim());
+  const songDraftHasImportedDetails = Boolean(draft.spotifyTrackId || draft.spotifyUrl || draft.albumName || draft.albumArtUrl);
+  const lyricTextStyle = useMemo<CSSProperties>(
+    () => ({
+      fontSize: `${lyricTextSize}px`,
+      lineHeight: 1.35
+    }),
+    [lyricTextSize]
+  );
+  const lyricLineStyle = useMemo<CSSProperties>(
+    () => ({
+      paddingTop: `${lyricLineSpacing}px`,
+      paddingBottom: `${lyricLineSpacing}px`
+    }),
+    [lyricLineSpacing]
+  );
+  const lyricWordsStyle = useMemo<CSSProperties>(
+    () => ({
+      columnGap: `${lyricWordSpacing}px`
+    }),
+    [lyricWordSpacing]
+  );
 
   const filteredSongs = useMemo(() => {
     const query = localSearch.trim().toLowerCase();
@@ -1238,9 +1342,28 @@ export function VocalMapApp({
     setNoteDraft("");
   }
 
+  function updateLyricTextSize(nextSize: number) {
+    const size = clampLyricTextSize(nextSize);
+    setLyricTextSize(size);
+    localStorage.setItem(lyricTextSizeStorageKey(userId), String(size));
+  }
+
+  function updateLyricLineSpacing(nextSpacing: number) {
+    const spacing = clampLyricLineSpacing(nextSpacing);
+    setLyricLineSpacing(spacing);
+    localStorage.setItem(lyricLineSpacingStorageKey(userId), String(spacing));
+  }
+
+  function updateLyricWordSpacing(nextSpacing: number) {
+    const spacing = clampLyricWordSpacing(nextSpacing);
+    setLyricWordSpacing(spacing);
+    localStorage.setItem(lyricWordSpacingStorageKey(userId), String(spacing));
+  }
+
   function openManualDraft() {
     setEditingSongId("new");
     setDraft(EMPTY_DRAFT);
+    setPendingSongAudioFile(null);
     setSpotifyQuery("");
     setSpotifyResults([]);
     setSpotifyMessage("");
@@ -1251,6 +1374,7 @@ export function VocalMapApp({
   function openSongEditor(song: Song) {
     setEditingSongId(song.id);
     setDraft(songToDraft(song));
+    setPendingSongAudioFile(null);
     closeNoteEditor();
     setSelection(null);
   }
@@ -1429,19 +1553,35 @@ export function VocalMapApp({
     try {
       await persistSong(song, existingSong);
       await deleteStoragePaths(collectRemovedAudioPaths(existingSong, song));
+      let nextSong = song;
+      let audioUploadFailed = false;
+
+      if (pendingSongAudioFile) {
+        try {
+          const audioReference = await persistAudioReference({ songId: song.id, type: "song" }, pendingSongAudioFile);
+          nextSong = {
+            ...song,
+            songAudios: [...song.songAudios, audioReference],
+            updatedAt: new Date().toISOString()
+          };
+        } catch {
+          audioUploadFailed = true;
+        }
+      }
 
       setSongs((currentSongs) => {
         if (existingSong) {
-          return currentSongs.map((item) => (item.id === existingSong.id ? song : item));
+          return currentSongs.map((item) => (item.id === existingSong.id ? nextSong : item));
         }
-        return [song, ...currentSongs];
+        return [nextSong, ...currentSongs];
       });
 
-      setActiveSongId(song.id);
+      setPendingSongAudioFile(null);
+      setActiveSongId(nextSong.id);
       setEditingSongId(null);
       closeNoteEditor();
       setSelection(null);
-      setStatusMessage(t("songSaved"));
+      setStatusMessage(audioUploadFailed ? t("songSavedAudioFailed") : t("songSaved"));
     } catch {
       setStatusMessage(t("saveFailed"));
     } finally {
@@ -2481,31 +2621,87 @@ export function VocalMapApp({
 
   return (
     <div
-      className="relative grid h-dvh grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden bg-[#87f0dc] bg-cover bg-center p-3 md:grid-cols-[22rem_minmax(0,1fr)] md:grid-rows-1"
+      className={`relative grid h-dvh grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden bg-[#87f0dc] bg-cover bg-center p-3 md:grid-rows-1 ${
+        isSidebarCollapsed ? "md:grid-cols-[4.75rem_minmax(0,1fr)]" : "md:grid-cols-[22rem_minmax(0,1fr)]"
+      }`}
       style={{ backgroundImage: "url('/images/auth-green-bg.png')" }}
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(220,255,246,0.18),rgba(35,181,156,0.12)_46%,rgba(12,130,111,0.24)_100%)]" />
-      <aside className="relative z-10 flex max-h-[42dvh] min-h-0 flex-col gap-3 overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-3 shadow-[0_28px_80px_rgba(0,104,83,0.20)] md:h-full md:max-h-none">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid size-10 flex-none place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.24)]">
-              <AudioLines size={19} strokeWidth={2.5} />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-bold text-stone-950">{common("appName")}</p>
-              <p className="truncate text-xs text-stone-500">{t("brandSubtitle")}</p>
+      <aside
+        className={`relative z-10 flex min-h-0 overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white shadow-[0_28px_80px_rgba(0,104,83,0.20)] ${
+          isSidebarCollapsed
+            ? "max-h-none flex-row items-center justify-between gap-2 p-2 md:h-full md:flex-col md:items-center md:justify-start"
+            : "max-h-[42dvh] flex-col gap-3 p-3 md:h-full md:max-h-none"
+        }`}
+      >
+        {isSidebarCollapsed ? (
+          <div className="flex w-full items-center justify-between gap-2 md:w-10 md:flex-col md:justify-start md:gap-2">
+            <button
+              className="grid h-10 w-12 flex-none place-items-center rounded-xl px-1 transition hover:bg-emerald-50"
+              type="button"
+              onClick={() => setIsSidebarCollapsed(false)}
+              aria-label="Open menu"
+              title="Open menu"
+            >
+              <Image className="h-auto w-full" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
+            </button>
+            <div className="flex items-center gap-2 md:w-10 md:flex-col md:items-center md:gap-2">
+              <button
+                className="inline-grid size-9 flex-none place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+                type="button"
+                onClick={() => setIsSidebarCollapsed(false)}
+                aria-label="Open menu"
+                title="Open menu"
+              >
+                <PanelLeftOpen size={17} />
+              </button>
+              <button
+                className={`inline-grid size-9 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 ${
+                  isSettingsOpen ? "border-stone-300 bg-stone-50 text-stone-950" : "border-stone-200"
+                }`}
+                type="button"
+                onClick={() => {
+                  setIsSettingsOpen((isOpen) => !isOpen);
+                  setActiveSettingsPanel("markers");
+                  setIsMarkerFormOpen(false);
+                  setEditingMarkerId(null);
+                  setSelectedMarkerId(null);
+                }}
+                aria-expanded={isSettingsOpen}
+                aria-label="Settings"
+                title="Settings"
+              >
+                <Settings2 size={17} />
+              </button>
+              <button
+                className="inline-grid size-9 flex-none place-items-center rounded-full border border-emerald-200 bg-emerald-600 text-white transition hover:bg-emerald-700"
+                type="button"
+                onClick={openManualDraft}
+                aria-label={t("newSong")}
+                title={t("newSong")}
+              >
+                <Plus size={18} />
+              </button>
             </div>
           </div>
-          <button
-            className={`inline-grid size-9 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 ${
-              isSettingsOpen ? "border-stone-300 bg-stone-50 text-stone-950" : "border-stone-200"
-            }`}
-            type="button"
-            onClick={() => {
-              setIsSettingsOpen((isOpen) => !isOpen);
-              setIsMarkerFormOpen(false);
-              setEditingMarkerId(null);
-              setSelectedMarkerId(null);
+        ) : (
+          <>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Image className="h-auto w-32 flex-none" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
+          </div>
+          <div className="flex flex-none items-center gap-2">
+              <button
+                className={`inline-grid size-9 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 ${
+                  isSettingsOpen ? "border-stone-300 bg-stone-50 text-stone-950" : "border-stone-200"
+                }`}
+                type="button"
+                onClick={() => {
+                  setIsSettingsOpen((isOpen) => !isOpen);
+                  setActiveSettingsPanel("markers");
+                  setIsMarkerFormOpen(false);
+                  setEditingMarkerId(null);
+                  setSelectedMarkerId(null);
             }}
             aria-expanded={isSettingsOpen}
             aria-label="Settings"
@@ -2513,6 +2709,16 @@ export function VocalMapApp({
           >
             <Settings2 size={17} />
           </button>
+            <button
+              className="inline-grid size-9 flex-none place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+              type="button"
+              onClick={() => setIsSidebarCollapsed(true)}
+              aria-label="Collapse menu"
+              title="Collapse menu"
+            >
+              <PanelLeftClose size={17} />
+            </button>
+          </div>
         </div>
 
         {hasLocalData ? (
@@ -2725,6 +2931,8 @@ export function VocalMapApp({
             </div>
           ) : null}
         </div>
+          </>
+        )}
       </aside>
 
       <section className="relative z-10 min-h-0 min-w-0 overflow-auto px-2 py-4 sm:px-4 lg:px-5">
@@ -2735,27 +2943,17 @@ export function VocalMapApp({
                 <p className="text-xs font-bold uppercase text-stone-500">{editingSongId === "new" ? t("editorNew") : t("editorEdit")}</p>
                 <h1 className="mt-1 text-3xl font-bold leading-tight text-stone-950 sm:text-4xl">{draft.title || common("untitledSong")}</h1>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button className={secondaryButtonClass} type="button" onClick={() => setEditingSongId(null)}>
-                  <X size={16} />
-                  {common("close")}
-                </button>
-                <button className={primaryButtonClass} type="button" onClick={() => void saveDraft()} disabled={!draft.title.trim() || isSaving}>
-                  {isSaving ? <Loader2 className="spin size-4" /> : null}
-                  {isSaving ? common("saving") : common("save")}
-                </button>
-              </div>
             </div>
 
             {editingSongId === "new" ? (
-              <section className="mb-5 grid gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 sm:p-4">
+              <section className="mb-4 grid gap-3 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
-                      <Search size={14} />
-                      {t("musicSearchTitle")}
+                      <span className="grid size-5 place-items-center rounded-full bg-emerald-600 text-[11px] leading-none text-white">1</span>
+                      {t("songFlowSearchTitle")}
                     </p>
-                    <p className="mt-1 text-sm leading-5 text-stone-600">{t("musicSearchHelp")}</p>
+                    <p className="mt-1 text-sm leading-5 text-stone-600">{t("songFlowSearchBody")}</p>
                   </div>
                   {spotifyResults.length > 0 ? <p className="text-xs font-bold text-emerald-700">{t("searchResultsCount", { count: spotifyResults.length })}</p> : null}
                 </div>
@@ -2801,47 +2999,104 @@ export function VocalMapApp({
                     ))}
                   </div>
                 ) : null}
+                <p className="text-xs leading-5 text-stone-500">{t("songFlowManualFallback")}</p>
               </section>
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-2 text-sm font-semibold text-stone-700">
-                {t("titleLabel")}
-                <input className={inputClass} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
-              </label>
-              <label className="grid gap-2 text-sm font-semibold text-stone-700">
-                {t("artistLabel")}
-                <input className={inputClass} value={draft.artist} onChange={(event) => setDraft((current) => ({ ...current, artist: event.target.value }))} />
-              </label>
-            </div>
-
-            {draft.albumArtUrl || draft.spotifyUrl ? (
-              <div className="my-5 flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
-                {draft.albumArtUrl ? <Image className="rounded-md object-cover" src={draft.albumArtUrl} alt={draft.title ? t("coverAlt", { title: draft.title }) : t("importedCoverAlt")} width={54} height={54} /> : null}
-                <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase text-stone-500">{t("importedFromSpotify")}</p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    {draft.albumName ? `${draft.albumName} · ` : ""}
-                    {formatDuration(draft.durationMs)}
-                  </p>
-                  {draft.spotifyUrl ? (
-                    <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700" href={draft.spotifyUrl} target="_blank" rel="noreferrer">
-                      {common("openInSpotify")} <ExternalLink size={13} />
-                    </a>
-                  ) : null}
-                </div>
+            <section className="grid gap-4 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4">
+              <div>
+                <p className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
+                  <span className="grid size-5 place-items-center rounded-full bg-emerald-600 text-[11px] leading-none text-white">2</span>
+                  {t("songFlowDetailsTitle")}
+                </p>
+                <p className="mt-1 text-sm leading-5 text-stone-600">{t("songFlowDetailsBody")}</p>
               </div>
-            ) : null}
 
-            <label className="mt-5 grid gap-2 text-sm font-semibold text-stone-700">
-              {t("lyricsLabel")}
-              <textarea
-                className="min-h-[46dvh] w-full resize-y rounded-xl border border-stone-200 bg-white p-4 text-base leading-7 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                value={draft.lyricsText}
-                onChange={(event) => setDraft((current) => ({ ...current, lyricsText: event.target.value }))}
-                placeholder={t("lyricsPlaceholder")}
-              />
-            </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="grid gap-2 text-sm font-semibold text-stone-700">
+                  {t("titleLabel")}
+                  <input className={inputClass} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
+                </label>
+                <label className="grid gap-2 text-sm font-semibold text-stone-700">
+                  {t("artistLabel")}
+                  <input className={inputClass} value={draft.artist} onChange={(event) => setDraft((current) => ({ ...current, artist: event.target.value }))} />
+                </label>
+              </div>
+
+              {draft.albumArtUrl || draft.spotifyUrl ? (
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+                  {draft.albumArtUrl ? <Image className="rounded-md object-cover" src={draft.albumArtUrl} alt={draft.title ? t("coverAlt", { title: draft.title }) : t("importedCoverAlt")} width={54} height={54} /> : null}
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase text-stone-500">{t("importedFromSpotify")}</p>
+                    <p className="mt-1 text-sm text-stone-600">
+                      {draft.albumName ? `${draft.albumName} · ` : ""}
+                      {formatDuration(draft.durationMs)}
+                    </p>
+                    {draft.spotifyUrl ? (
+                      <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700" href={draft.spotifyUrl} target="_blank" rel="noreferrer">
+                        {common("openInSpotify")} <ExternalLink size={13} />
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              <label className="grid gap-2 text-sm font-semibold text-stone-700">
+                {t("lyricsLabel")}
+                <textarea
+                  className="min-h-[34dvh] w-full resize-y rounded-xl border border-stone-200 bg-white p-4 text-base leading-7 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                  value={draft.lyricsText}
+                  onChange={(event) => setDraft((current) => ({ ...current, lyricsText: event.target.value }))}
+                  placeholder={t("lyricsPlaceholder")}
+                />
+              </label>
+            </section>
+
+            <section className="mt-4 grid gap-3 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4">
+              <div>
+                <p className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
+                  <span className={`grid size-5 place-items-center rounded-full text-[11px] leading-none text-white ${songDraftIsComplete ? "bg-emerald-600" : "bg-stone-300"}`}>3</span>
+                  {t("songFlowAudioTitle")}
+                </p>
+                <p className="mt-1 text-sm leading-5 text-stone-600">{t("songFlowAudioBody")}</p>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className={`${secondaryButtonClass} min-h-11 cursor-pointer ${!songDraftIsComplete ? "pointer-events-none opacity-60" : ""}`}>
+                  <Upload size={16} />
+                  {pendingSongAudioFile ? t("replaceAudioFile") : t("chooseAudioFile")}
+                  <input
+                    className="sr-only"
+                    type="file"
+                    accept="audio/*"
+                    disabled={!songDraftIsComplete}
+                    onChange={(event) => setPendingSongAudioFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {draft.spotifyUrl ? (
+                  <a className={`${secondaryButtonClass} min-h-11`} href={draft.spotifyUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink size={16} />
+                    {common("openInSpotify")}
+                  </a>
+                ) : (
+                  <p className="flex min-h-11 items-center rounded-xl border border-stone-200 bg-stone-50 px-3 text-sm leading-5 text-stone-500">
+                    {songDraftHasImportedDetails ? t("spotifyUnavailableForDraft") : t("spotifyAppearsAfterSearch")}
+                  </p>
+                )}
+              </div>
+              {pendingSongAudioFile ? <p className="text-sm font-medium text-emerald-700">{t("selectedAudioFile", { name: pendingSongAudioFile.name })}</p> : null}
+            </section>
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button className={secondaryButtonClass} type="button" onClick={() => setEditingSongId(null)}>
+                <X size={16} />
+                {common("close")}
+              </button>
+              <button className={`${primaryButtonClass} min-w-28`} type="button" onClick={() => void saveDraft()} disabled={!songDraftIsComplete || isSaving}>
+                {isSaving ? <Loader2 className="spin size-4" /> : null}
+                {isSaving ? common("saving") : common("save")}
+              </button>
+            </div>
           </div>
         ) : activeSong ? (
           <div>
@@ -2869,6 +3124,9 @@ export function VocalMapApp({
                     markerById={markerById}
                     selectedLineId={selectedLineId}
                     selectedWordIds={selectedWordIds}
+                    lyricTextStyle={lyricTextStyle}
+                    lyricLineStyle={lyricLineStyle}
+                    lyricWordsStyle={lyricWordsStyle}
                     labels={{
                       emptyLine: common("emptyLine"),
                       lineAudio: t("lineAudioTitle"),
@@ -2883,8 +3141,8 @@ export function VocalMapApp({
         ) : (
           <div className="mx-auto grid h-full min-h-[24rem] max-w-lg place-items-center content-center">
             <div className="grid w-full justify-items-center gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-8 text-center shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
-              <div className="grid size-12 place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.24)]">
-                <AudioLines size={22} strokeWidth={2.5} />
+              <div className="grid h-12 w-40 place-items-center rounded-xl bg-emerald-600 px-4">
+                <Image className="h-auto w-full" src="/images/vocalmap-logo.svg" alt={common("appName")} width={351} height={102} priority />
               </div>
               <h1 className="text-2xl font-bold text-stone-950 sm:text-3xl">{t("emptyWorkspaceTitle")}</h1>
               <p className="max-w-md text-sm leading-6 text-stone-600 sm:text-base sm:leading-7">{t("emptyWorkspaceBody")}</p>
@@ -2913,6 +3171,7 @@ export function VocalMapApp({
                   setIsMarkerFormOpen(false);
                   setEditingMarkerId(null);
                   setSelectedMarkerId(null);
+                  setActiveSettingsPanel("markers");
                 }}
                 title={common("close")}
               >
@@ -2922,7 +3181,13 @@ export function VocalMapApp({
 
             <div className="grid min-h-0 grid-cols-1 md:grid-cols-[14rem_minmax(0,1fr)]">
               <nav className="flex overflow-x-auto border-b border-stone-200 bg-white md:block md:overflow-visible md:border-b-0 md:border-r">
-                <button className="flex min-w-48 items-center justify-between gap-3 border-r border-stone-200 bg-emerald-50/50 px-3 py-3 text-left md:w-full md:border-b md:border-r-0" type="button">
+                <button
+                  className={`flex min-w-48 items-center justify-between gap-3 border-r border-stone-200 px-3 py-3 text-left transition md:w-full md:border-b md:border-r-0 ${
+                    activeSettingsPanel === "markers" ? "bg-emerald-50/50" : "bg-white hover:bg-stone-50"
+                  }`}
+                  type="button"
+                  onClick={() => setActiveSettingsPanel("markers")}
+                >
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="grid size-7 flex-none place-items-center rounded-lg bg-emerald-50 text-emerald-700">
                       <Sparkles size={14} />
@@ -2933,9 +3198,32 @@ export function VocalMapApp({
                     </span>
                   </span>
                 </button>
+                <button
+                  className={`flex min-w-48 items-center justify-between gap-3 border-r border-stone-200 px-3 py-3 text-left transition md:w-full md:border-b md:border-r-0 ${
+                    activeSettingsPanel === "lyrics" ? "bg-emerald-50/50" : "bg-white hover:bg-stone-50"
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setActiveSettingsPanel("lyrics");
+                    setIsMarkerFormOpen(false);
+                    setEditingMarkerId(null);
+                    setSelectedMarkerId(null);
+                  }}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="grid size-7 flex-none place-items-center rounded-lg bg-stone-50 text-stone-700">
+                      <FileText size={14} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-stone-950">{t("songTextSettingsTitle")}</span>
+                      <span className="block truncate text-xs text-stone-500">{t("songTextSettingsSummary", { size: lyricTextSize, lineSpacing: lyricLineSpacing, wordSpacing: lyricWordSpacing })}</span>
+                    </span>
+                  </span>
+                </button>
               </nav>
 
               <div className="min-h-0 overflow-auto">
+                {activeSettingsPanel === "markers" ? (
                 <div className="grid divide-y divide-stone-200">
                   <div className="flex items-center justify-between gap-3 p-4">
                     <div className="min-w-0">
@@ -3092,6 +3380,139 @@ export function VocalMapApp({
                     </form>
                   ) : null}
                 </div>
+                ) : (
+                  <div className="grid gap-4 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-semibold text-stone-950">{t("songTextSettingsTitle")}</h3>
+                        <p className="mt-1 text-xs leading-5 text-stone-500">{t("songTextSettingsHint")}</p>
+                      </div>
+                      <span className="flex-none rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs font-semibold text-stone-700">
+                        {t("songTextSettingsSummary", { size: lyricTextSize, lineSpacing: lyricLineSpacing, wordSpacing: lyricWordSpacing })}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-5 rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                      <label className="grid gap-2 text-xs font-semibold uppercase text-stone-500">
+                        {t("songTextSizeLabel")}
+                        <input
+                          className="accent-emerald-600"
+                          type="range"
+                          min={MIN_LYRIC_TEXT_SIZE}
+                          max={MAX_LYRIC_TEXT_SIZE}
+                          step={1}
+                          value={lyricTextSize}
+                          onChange={(event) => updateLyricTextSize(Number(event.target.value))}
+                        />
+                      </label>
+                      <div className="flex items-center justify-between text-[0.6875rem] font-medium text-stone-500">
+                        <span>{MIN_LYRIC_TEXT_SIZE}px</span>
+                        <span>{MAX_LYRIC_TEXT_SIZE}px</span>
+                      </div>
+
+                      <label className="grid gap-2 text-xs font-semibold uppercase text-stone-500">
+                        {t("songTextLineSpacingLabel")}
+                        <input
+                          className="accent-emerald-600"
+                          type="range"
+                          min={MIN_LYRIC_LINE_SPACING}
+                          max={MAX_LYRIC_LINE_SPACING}
+                          step={1}
+                          value={lyricLineSpacing}
+                          onChange={(event) => updateLyricLineSpacing(Number(event.target.value))}
+                        />
+                      </label>
+                      <div className="flex items-center justify-between text-[0.6875rem] font-medium text-stone-500">
+                        <span>{MIN_LYRIC_LINE_SPACING}px</span>
+                        <span>{MAX_LYRIC_LINE_SPACING}px</span>
+                      </div>
+
+                      <label className="grid gap-2 text-xs font-semibold uppercase text-stone-500">
+                        {t("songTextWordSpacingLabel")}
+                        <input
+                          className="accent-emerald-600"
+                          type="range"
+                          min={MIN_LYRIC_WORD_SPACING}
+                          max={MAX_LYRIC_WORD_SPACING}
+                          step={1}
+                          value={lyricWordSpacing}
+                          onChange={(event) => updateLyricWordSpacing(Number(event.target.value))}
+                        />
+                      </label>
+                      <div className="flex items-center justify-between text-[0.6875rem] font-medium text-stone-500">
+                        <span>{MIN_LYRIC_WORD_SPACING}px</span>
+                        <span>{MAX_LYRIC_WORD_SPACING}px</span>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <p className="text-xs font-semibold uppercase text-stone-500">{t("songTextSizeLabel")}</p>
+                      <div className="flex flex-wrap gap-2">
+                      {[18, 24, 30].map((size) => (
+                        <button
+                          className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
+                            lyricTextSize === size ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                          }`}
+                          type="button"
+                          key={size}
+                          onClick={() => updateLyricTextSize(size)}
+                        >
+                          {t("songTextSizeValue", { size })}
+                        </button>
+                      ))}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <p className="text-xs font-semibold uppercase text-stone-500">{t("songTextLineSpacingLabel")}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {[4, 8, 16].map((spacing) => (
+                          <button
+                            className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
+                              lyricLineSpacing === spacing ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                            }`}
+                            type="button"
+                            key={spacing}
+                            onClick={() => updateLyricLineSpacing(spacing)}
+                          >
+                            {t("songTextLineSpacingValue", { spacing })}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <p className="text-xs font-semibold uppercase text-stone-500">{t("songTextWordSpacingLabel")}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {[4, 8, 16].map((spacing) => (
+                          <button
+                            className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
+                              lyricWordSpacing === spacing ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                            }`}
+                            type="button"
+                            key={spacing}
+                            onClick={() => updateLyricWordSpacing(spacing)}
+                          >
+                            {t("songTextWordSpacingValue", { spacing })}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-stone-200 bg-white p-4">
+                      <p className="text-xs font-semibold uppercase text-stone-500">{t("songTextPreviewLabel")}</p>
+                      <div className="mt-3 grid text-stone-950">
+                        {["I took your heart", "I did things to you", "Only lovers would do in the dark"].map((line) => (
+                          <p className="flex flex-wrap" key={line} style={{ ...lyricTextStyle, ...lyricLineStyle, ...lyricWordsStyle }}>
+                            {line.split(" ").map((word, wordIndex) => (
+                              <span key={`${line}-${wordIndex}`}>{word}</span>
+                            ))}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>

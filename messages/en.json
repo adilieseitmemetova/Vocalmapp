@@ -23,9 +23,7 @@
     "openInSpotify": "Open in Spotify",
     "untitledSong": "Untitled song",
     "noArtist": "No artist",
-    "emptyLine": "Empty line",
-    "localDataDetected": "Local browser data was detected from the previous prototype. New changes are saved to Supabase.",
-    "dismiss": "Dismiss"
+    "emptyLine": "Empty line"
   },
   "auth": {
     "eyebrow": "Private vocal workspace",

@@ -1089,7 +1089,6 @@ export function VocalMapApp({
   const [lyricWordSpacing, setLyricWordSpacing] = useState(DEFAULT_LYRIC_WORD_SPACING);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [hasLocalData, setHasLocalData] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(initialProfile);
   const [profileDraft, setProfileDraft] = useState({
     displayName: initialProfile.displayName ?? "",
@@ -1154,14 +1153,6 @@ export function VocalMapApp({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, []);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setHasLocalData(Boolean(localStorage.getItem("vocalmap:songs:v1") ?? localStorage.getItem("vocal-song-markup:songs:v1")));
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
   }, []);
 
   useEffect(() => {
@@ -2721,17 +2712,6 @@ export function VocalMapApp({
           </div>
         </div>
 
-        {hasLocalData ? (
-          <button
-            className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs leading-5 text-amber-900"
-            type="button"
-            onClick={() => setHasLocalData(false)}
-          >
-            <span className="block font-semibold">{common("localDataDetected")}</span>
-            <span>{common("dismiss")}</span>
-          </button>
-        ) : null}
-
         {activeSong ? (
           <SongMenuCard
             song={activeSong}
@@ -3141,9 +3121,7 @@ export function VocalMapApp({
         ) : (
           <div className="mx-auto grid h-full min-h-[24rem] max-w-lg place-items-center content-center">
             <div className="grid w-full justify-items-center gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-8 text-center shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
-              <div className="grid h-12 w-40 place-items-center rounded-xl bg-emerald-600 px-4">
-                <Image className="h-auto w-full" src="/images/vocalmap-logo.svg" alt={common("appName")} width={351} height={102} priority />
-              </div>
+              <Image className="h-auto w-40" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
               <h1 className="text-2xl font-bold text-stone-950 sm:text-3xl">{t("emptyWorkspaceTitle")}</h1>
               <p className="max-w-md text-sm leading-6 text-stone-600 sm:text-base sm:leading-7">{t("emptyWorkspaceBody")}</p>
               <button className={`${primaryButtonClass} min-w-36`} type="button" onClick={openManualDraft}>

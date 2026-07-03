@@ -227,6 +227,8 @@ export function EmailCodeForm() {
                 alt=""
                 width={20}
                 height={20}
+                loading="eager"
+                priority
                 aria-hidden="true"
               />
             )}

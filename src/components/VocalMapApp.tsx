@@ -95,6 +95,7 @@ type MarkerPreferences = {
   systemOverrides: Record<string, MarkerDraft>;
 };
 type SettingsPanel = "markers" | "lyrics";
+type AudioProvider = "spotify" | "file";
 type StoredTextNote = {
   id: string;
   songId: string;
@@ -729,22 +730,6 @@ function useAudioUrl(audioReference: AudioReference | undefined, supabase: Retur
   return url;
 }
 
-function StoredAudioPlayer({
-  audioReference,
-  supabase
-}: {
-  audioReference?: AudioReference;
-  supabase: ReturnType<typeof createClient>;
-}) {
-  const url = useAudioUrl(audioReference, supabase);
-
-  if (!url) {
-    return null;
-  }
-
-  return <audio className="h-9 w-full max-w-sm" controls src={url} />;
-}
-
 function LyricsLine({
   line,
   songId,
@@ -899,7 +884,6 @@ function SongMenuCard({
   onDelete,
   optionsOpen,
   onToggleOptions,
-  supabase,
   labels
 }: {
   song: Song;
@@ -909,7 +893,6 @@ function SongMenuCard({
   onDelete: (song: Song) => void;
   optionsOpen: boolean;
   onToggleOptions: () => void;
-  supabase: ReturnType<typeof createClient>;
   labels: {
     coverAlt: string;
     noArtist: string;
@@ -993,9 +976,11 @@ function SongMenuCard({
 
       {song.songAudios.length > 0 ? (
         <div className="grid gap-2">
-          {song.songAudios.map((audioReference) => (
-            <div className="flex min-w-0 items-center gap-2" key={audioReference.id}>
-              <StoredAudioPlayer audioReference={audioReference} supabase={supabase} />
+          {song.songAudios.map((audioReference, index) => (
+            <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50 px-2 py-1.5" key={audioReference.id}>
+              <span className="truncate text-xs font-medium text-stone-700">
+                {labels.addFile} {index + 1}
+              </span>
               <button className={`${iconButtonClass} size-8 rounded-full text-red-700`} type="button" onClick={() => onRemove(song, audioReference)} title={labels.deleteAudio}>
                 <Trash2 size={13} />
               </button>
@@ -1007,22 +992,113 @@ function SongMenuCard({
   );
 }
 
-function SpotifyTrackPlayer({ song, title }: { song: Song; title: string }) {
+function AudioProviderDock({
+  song,
+  provider,
+  selectedAudioId,
+  sidebarCollapsed,
+  onProviderChange,
+  onSelectedAudioChange,
+  supabase,
+  labels
+}: {
+  song: Song;
+  provider: AudioProvider;
+  selectedAudioId: string | null;
+  sidebarCollapsed: boolean;
+  onProviderChange: (provider: AudioProvider) => void;
+  onSelectedAudioChange: (audioId: string) => void;
+  supabase: ReturnType<typeof createClient>;
+  labels: {
+    nowPlaying: string;
+    spotify: string;
+    file: string;
+    fileSelect: string;
+    noFile: string;
+    spotifyTitle: string;
+  };
+}) {
   const trackId = getSpotifyTrackEmbedId(song);
+  const hasSpotify = Boolean(trackId);
+  const hasFiles = song.songAudios.length > 0;
+  const activeAudio = song.songAudios.find((audioReference) => audioReference.id === selectedAudioId) ?? song.songAudios[0];
+  const fileUrl = useAudioUrl(provider === "file" ? activeAudio : undefined, supabase);
 
-  if (!trackId) {
+  if (!hasSpotify && !hasFiles) {
     return null;
   }
 
   return (
-    <div className="mx-auto mb-5 max-w-6xl overflow-hidden rounded-[1.25rem] border border-white/70 bg-white/[0.9] p-2 shadow-[0_18px_50px_rgba(0,104,83,0.12)] backdrop-blur-md">
-      <iframe
-        className="block h-20 w-full rounded-[1rem]"
-        title={title}
-        src={`https://open.spotify.com/embed/track/${encodeURIComponent(trackId)}?utm_source=generator`}
-        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-        loading="lazy"
-      />
+    <div
+      className={`fixed inset-x-3 bottom-3 z-30 rounded-2xl border border-stone-200 bg-white p-2 ${
+        sidebarCollapsed ? "md:left-[calc(4.75rem+1.5rem)] md:right-5" : "md:left-[calc(22rem+1.5rem)] md:right-5"
+      }`}
+    >
+      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          {song.albumArtUrl ? <Image className="size-11 flex-none rounded-lg object-cover" src={song.albumArtUrl} alt={labels.nowPlaying} width={44} height={44} /> : <Music2 className="flex-none text-stone-500" size={22} />}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-stone-950">{song.title}</p>
+            <p className="truncate text-xs text-stone-500">{song.artist ?? labels.nowPlaying}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {hasSpotify ? (
+            <button
+              className={`inline-flex h-9 items-center justify-center rounded-full border px-3 text-xs font-semibold transition ${
+                provider === "spotify" ? "border-stone-950 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
+              }`}
+              type="button"
+              onClick={() => onProviderChange("spotify")}
+            >
+              {labels.spotify}
+            </button>
+          ) : null}
+          {hasFiles ? (
+            <button
+              className={`inline-flex h-9 items-center justify-center rounded-full border px-3 text-xs font-semibold transition ${
+                provider === "file" ? "border-emerald-600 bg-emerald-600 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
+              }`}
+              type="button"
+              onClick={() => onProviderChange("file")}
+            >
+              {labels.file}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-2">
+        {provider === "spotify" && trackId ? (
+          <iframe
+            className="block h-20 w-full rounded-xl"
+            title={labels.spotifyTitle}
+            src={`https://open.spotify.com/embed/track/${encodeURIComponent(trackId)}?utm_source=generator`}
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+            loading="lazy"
+          />
+        ) : null}
+        {provider === "file" ? (
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+            {fileUrl ? <audio className="h-10 w-full" controls src={fileUrl} /> : <p className="text-sm text-stone-500">{labels.noFile}</p>}
+            {song.songAudios.length > 1 ? (
+              <select
+                className="h-10 rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                value={activeAudio?.id ?? ""}
+                onChange={(event) => onSelectedAudioChange(event.target.value)}
+                aria-label={labels.fileSelect}
+              >
+                {song.songAudios.map((audioReference, index) => (
+                  <option key={audioReference.id} value={audioReference.id}>
+                    {labels.file} {index + 1}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -1087,6 +1163,8 @@ export function VocalMapApp({
   const [lyricTextSize, setLyricTextSize] = useState(DEFAULT_LYRIC_TEXT_SIZE);
   const [lyricLineSpacing, setLyricLineSpacing] = useState(DEFAULT_LYRIC_LINE_SPACING);
   const [lyricWordSpacing, setLyricWordSpacing] = useState(DEFAULT_LYRIC_WORD_SPACING);
+  const [preferredAudioProvider, setPreferredAudioProvider] = useState<AudioProvider>("file");
+  const [selectedSongAudioId, setSelectedSongAudioId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(initialProfile);
@@ -1279,8 +1357,32 @@ export function VocalMapApp({
     }
   }, [isLibrarySearchOpen]);
 
+  useEffect(() => {
+    if (!statusMessage || statusMessage === t("recording")) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStatusMessage("");
+    }, 3200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [statusMessage, t]);
+
   const effectiveActiveSongId = activeSongId ?? songs[0]?.id ?? null;
   const activeSong = useMemo(() => songs.find((song) => song.id === effectiveActiveSongId), [effectiveActiveSongId, songs]);
+  const activeSongHasSpotify = Boolean(activeSong && getSpotifyTrackEmbedId(activeSong));
+  const activeSongHasFiles = Boolean(activeSong && activeSong.songAudios.length > 0);
+  const activeAudioProvider: AudioProvider | null =
+    preferredAudioProvider === "file" && activeSongHasFiles
+      ? "file"
+      : preferredAudioProvider === "spotify" && activeSongHasSpotify
+        ? "spotify"
+        : activeSongHasFiles
+          ? "file"
+          : activeSongHasSpotify
+            ? "spotify"
+            : null;
   const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
   const visibleMarkers = useMemo(() => markers.filter((marker) => !marker.isSystem || !hiddenSystemMarkerIds.has(marker.id)), [hiddenSystemMarkerIds, markers]);
   const selectedMarker = useMemo(() => visibleMarkers.find((marker) => marker.id === selectedMarkerId) ?? null, [selectedMarkerId, visibleMarkers]);
@@ -1550,6 +1652,8 @@ export function VocalMapApp({
       if (pendingSongAudioFile) {
         try {
           const audioReference = await persistAudioReference({ songId: song.id, type: "song" }, pendingSongAudioFile);
+          setSelectedSongAudioId(audioReference.id);
+          setPreferredAudioProvider("file");
           nextSong = {
             ...song,
             songAudios: [...song.songAudios, audioReference],
@@ -1864,6 +1968,7 @@ export function VocalMapApp({
       durationMs: track.durationMs
     });
     setEditingSongId("new");
+    setPreferredAudioProvider(track.source === "spotify" ? "spotify" : "file");
     setActiveSongId(null);
     closeNoteEditor();
     setSelection(null);
@@ -2579,6 +2684,8 @@ export function VocalMapApp({
       setSongs((currentSongs) =>
         currentSongs.map((item) => (item.id === song.id ? { ...item, songAudios: [...item.songAudios, audioReference], updatedAt: new Date().toISOString() } : item))
       );
+      setSelectedSongAudioId(audioReference.id);
+      setPreferredAudioProvider("file");
       setStatusMessage(t("songAudioSaved"));
     } catch {
       setStatusMessage(t("uploadFailed"));
@@ -2727,7 +2834,6 @@ export function VocalMapApp({
             }}
             optionsOpen={openSongOptionsId === `active:${activeSong.id}`}
             onToggleOptions={() => setOpenSongOptionsId((currentId) => (currentId === `active:${activeSong.id}` ? null : `active:${activeSong.id}`))}
-            supabase={supabase}
             labels={{
               coverAlt: t("coverAlt", { title: activeSong.title }),
               noArtist: common("noArtist"),
@@ -2915,7 +3021,7 @@ export function VocalMapApp({
         )}
       </aside>
 
-      <section className="relative z-10 min-h-0 min-w-0 overflow-auto px-2 py-4 sm:px-4 lg:px-5">
+      <section className={`relative z-10 min-h-0 min-w-0 overflow-auto px-2 py-4 sm:px-4 lg:px-5 ${activeAudioProvider && !editingSongId ? "pb-40" : ""}`}>
         {editingSongId ? (
           <div className="mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.94] p-5 shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
             <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -3080,8 +3186,6 @@ export function VocalMapApp({
           </div>
         ) : activeSong ? (
           <div>
-            <SpotifyTrackPlayer song={activeSong} title={t("spotifyPlayerTitle", { title: activeSong.title })} />
-
             <div className="mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.94] px-2 py-5 shadow-[0_28px_80px_rgba(0,104,83,0.16)] backdrop-blur-md sm:px-4 sm:py-8">
               {activeSong.lyrics.length === 0 || activeSong.lyrics.every((line) => line.text.trim().length === 0) ? (
                 <div className="grid min-h-72 place-items-center content-center gap-3 text-center text-stone-500">
@@ -3132,6 +3236,26 @@ export function VocalMapApp({
           </div>
         )}
       </section>
+
+      {activeSong && activeAudioProvider && !editingSongId ? (
+        <AudioProviderDock
+          song={activeSong}
+          provider={activeAudioProvider}
+          selectedAudioId={selectedSongAudioId}
+          sidebarCollapsed={isSidebarCollapsed}
+          onProviderChange={setPreferredAudioProvider}
+          onSelectedAudioChange={setSelectedSongAudioId}
+          supabase={supabase}
+          labels={{
+            nowPlaying: t("audioDockNowPlaying"),
+            spotify: common("spotify"),
+            file: t("audioDockFile"),
+            fileSelect: t("audioDockFileSelect"),
+            noFile: t("audioDockNoFile"),
+            spotifyTitle: t("spotifyPlayerTitle", { title: activeSong.title })
+          }}
+        />
+      ) : null}
 
       {isSettingsOpen ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-stone-950/30 px-4 py-6 backdrop-blur-sm">

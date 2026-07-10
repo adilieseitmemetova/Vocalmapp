@@ -1615,7 +1615,13 @@ export function VocalMapApp({
     const sourceTrackId = song.spotifyTrackId ?? null;
 
     if (sourceTrackId) {
-      const existingTrack = await supabase.from("tracks").select("id").eq("source", source).eq("source_track_id", sourceTrackId).maybeSingle();
+      const existingTrack = await supabase
+        .from("tracks")
+        .select("id")
+        .eq("created_by", userId)
+        .eq("source", source)
+        .eq("source_track_id", sourceTrackId)
+        .maybeSingle();
       if (existingTrack.error) {
         throw existingTrack.error;
       }
@@ -1623,7 +1629,7 @@ export function VocalMapApp({
         return existingTrack.data.id;
       }
 
-      const existingSpotifyTrack = await supabase.from("tracks").select("id").eq("spotify_track_id", sourceTrackId).maybeSingle();
+      const existingSpotifyTrack = await supabase.from("tracks").select("id").eq("created_by", userId).eq("spotify_track_id", sourceTrackId).maybeSingle();
       if (existingSpotifyTrack.error) {
         throw existingSpotifyTrack.error;
       }
@@ -1633,6 +1639,7 @@ export function VocalMapApp({
     }
 
     const trackRow: TablesInsert<"tracks"> = {
+      created_by: userId,
       source,
       source_track_id: sourceTrackId,
       spotify_track_id: song.spotifyTrackId ?? null,
@@ -1650,12 +1657,18 @@ export function VocalMapApp({
     }
 
     if (sourceTrackId) {
-      const retryTrack = await supabase.from("tracks").select("id").eq("source", source).eq("source_track_id", sourceTrackId).maybeSingle();
+      const retryTrack = await supabase
+        .from("tracks")
+        .select("id")
+        .eq("created_by", userId)
+        .eq("source", source)
+        .eq("source_track_id", sourceTrackId)
+        .maybeSingle();
       if (!retryTrack.error && retryTrack.data?.id) {
         return retryTrack.data.id;
       }
 
-      const retrySpotifyTrack = await supabase.from("tracks").select("id").eq("spotify_track_id", sourceTrackId).maybeSingle();
+      const retrySpotifyTrack = await supabase.from("tracks").select("id").eq("created_by", userId).eq("spotify_track_id", sourceTrackId).maybeSingle();
       if (!retrySpotifyTrack.error && retrySpotifyTrack.data?.id) {
         return retrySpotifyTrack.data.id;
       }
@@ -1669,6 +1682,7 @@ export function VocalMapApp({
     const existingDocument = await supabase
       .from("lyrics_documents")
       .select("id")
+      .eq("created_by", userId)
       .eq("lyrics_hash", lyricsHash)
       .eq("tokenizer_version", LYRICS_TOKENIZER_VERSION)
       .maybeSingle();
@@ -1682,6 +1696,7 @@ export function VocalMapApp({
     }
 
     const documentRow: TablesInsert<"lyrics_documents"> = {
+      created_by: userId,
       track_id: trackId,
       provider: song.spotifyTrackId ? "spotify" : "manual",
       lyrics_text: song.sourceLyricsText,
@@ -1698,6 +1713,7 @@ export function VocalMapApp({
     const retryDocument = await supabase
       .from("lyrics_documents")
       .select("id")
+      .eq("created_by", userId)
       .eq("lyrics_hash", lyricsHash)
       .eq("tokenizer_version", LYRICS_TOKENIZER_VERSION)
       .maybeSingle();

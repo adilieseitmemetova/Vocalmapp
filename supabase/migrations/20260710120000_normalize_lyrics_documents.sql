@@ -1,5 +1,6 @@
 create table if not exists public.tracks (
   id uuid primary key default gen_random_uuid(),
+  created_by uuid not null default auth.uid() references auth.users (id) on delete cascade,
   source text not null default 'manual',
   source_track_id text,
   spotify_track_id text,
@@ -18,6 +19,7 @@ create table if not exists public.tracks (
 
 create table if not exists public.lyrics_documents (
   id uuid primary key default gen_random_uuid(),
+  created_by uuid not null default auth.uid() references auth.users (id) on delete cascade,
   track_id uuid not null references public.tracks (id) on delete cascade,
   provider text not null default 'manual',
   provider_lyrics_id text,
@@ -52,16 +54,18 @@ create table if not exists public.user_songs (
 );
 
 create unique index if not exists tracks_source_track_unique
-on public.tracks (source, source_track_id)
+on public.tracks (created_by, source, source_track_id)
 where source_track_id is not null;
 
 create unique index if not exists tracks_spotify_track_id_unique
-on public.tracks (spotify_track_id)
+on public.tracks (created_by, spotify_track_id)
 where spotify_track_id is not null;
 
 create unique index if not exists lyrics_documents_hash_tokenizer_unique
-on public.lyrics_documents (lyrics_hash, tokenizer_version);
+on public.lyrics_documents (created_by, lyrics_hash, tokenizer_version);
 
+create index if not exists tracks_created_by_idx on public.tracks (created_by);
+create index if not exists lyrics_documents_created_by_idx on public.lyrics_documents (created_by);
 create index if not exists lyrics_documents_track_id_idx on public.lyrics_documents (track_id);
 create index if not exists user_songs_user_updated_idx on public.user_songs (user_id, updated_at desc);
 create index if not exists user_songs_track_id_idx on public.user_songs (track_id);
@@ -99,8 +103,10 @@ grant select, insert, update, delete on public.user_songs to authenticated;
 
 drop policy if exists "Authenticated users can read tracks" on public.tracks;
 drop policy if exists "Authenticated users can insert tracks" on public.tracks;
+drop policy if exists "Users can insert their tracks" on public.tracks;
 drop policy if exists "Authenticated users can read lyrics documents" on public.lyrics_documents;
 drop policy if exists "Authenticated users can insert lyrics documents" on public.lyrics_documents;
+drop policy if exists "Users can insert their lyrics documents" on public.lyrics_documents;
 drop policy if exists "Users can read their user songs" on public.user_songs;
 drop policy if exists "Users can insert their user songs" on public.user_songs;
 drop policy if exists "Users can update their user songs" on public.user_songs;
@@ -108,19 +114,51 @@ drop policy if exists "Users can delete their user songs" on public.user_songs;
 
 create policy "Authenticated users can read tracks"
 on public.tracks for select to authenticated
-using (true);
+using (
+  created_by = (select auth.uid())
+  or exists (
+    select 1
+    from public.user_songs
+    where user_songs.track_id = tracks.id
+      and user_songs.user_id = (select auth.uid())
+  )
+);
 
-create policy "Authenticated users can insert tracks"
+create policy "Users can insert their tracks"
 on public.tracks for insert to authenticated
-with check (true);
+with check (created_by = (select auth.uid()));
 
 create policy "Authenticated users can read lyrics documents"
 on public.lyrics_documents for select to authenticated
-using (true);
+using (
+  created_by = (select auth.uid())
+  or exists (
+    select 1
+    from public.user_songs
+    where user_songs.lyrics_document_id = lyrics_documents.id
+      and user_songs.user_id = (select auth.uid())
+  )
+);
 
-create policy "Authenticated users can insert lyrics documents"
+create policy "Users can insert their lyrics documents"
 on public.lyrics_documents for insert to authenticated
-with check (true);
+with check (
+  created_by = (select auth.uid())
+  and exists (
+    select 1
+    from public.tracks
+    where tracks.id = lyrics_documents.track_id
+      and (
+        tracks.created_by = (select auth.uid())
+        or exists (
+          select 1
+          from public.user_songs
+          where user_songs.track_id = tracks.id
+            and user_songs.user_id = (select auth.uid())
+        )
+      )
+  )
+);
 
 create policy "Users can read their user songs"
 on public.user_songs for select to authenticated
@@ -193,6 +231,7 @@ begin
 
     if track_source_id is not null then
       insert into public.tracks (
+        created_by,
         source,
         source_track_id,
         spotify_track_id,
@@ -206,6 +245,7 @@ begin
         updated_at
       )
       values (
+        song_record.user_id,
         track_source,
         track_source_id,
         song_record.spotify_track_id,
@@ -225,17 +265,18 @@ begin
         select id
         into track_uuid
         from public.tracks
-        where (
-            source = track_source
-            and source_track_id = track_source_id
+        where created_by = song_record.user_id
+          and (
+            (source = track_source and source_track_id = track_source_id)
+            or spotify_track_id = song_record.spotify_track_id
           )
-          or spotify_track_id = song_record.spotify_track_id
         limit 1;
       end if;
     end if;
 
     if track_uuid is null then
       insert into public.tracks (
+        created_by,
         source,
         source_track_id,
         spotify_track_id,
@@ -249,6 +290,7 @@ begin
         updated_at
       )
       values (
+        song_record.user_id,
         track_source,
         track_source_id,
         song_record.spotify_track_id,
@@ -277,6 +319,7 @@ begin
     lyrics_hash_value := encode(extensions.digest(song_record.source_lyrics_text, 'sha256'), 'hex');
 
     insert into public.lyrics_documents (
+      created_by,
       track_id,
       provider,
       lyrics_text,
@@ -287,6 +330,7 @@ begin
       updated_at
     )
     values (
+      song_record.user_id,
       track_uuid,
       'legacy',
       song_record.source_lyrics_text,
@@ -296,7 +340,7 @@ begin
       song_record.created_at,
       song_record.updated_at
     )
-    on conflict (lyrics_hash, tokenizer_version) do update
+    on conflict (created_by, lyrics_hash, tokenizer_version) do update
     set line_word_counts = excluded.line_word_counts
     returning id into lyrics_uuid;
 

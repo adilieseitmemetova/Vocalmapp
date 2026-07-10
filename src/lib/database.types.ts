@@ -93,6 +93,7 @@ export type Database = {
       lyrics_documents: {
         Row: {
           created_at: string;
+          created_by: string;
           id: string;
           line_word_counts: Json;
           lyrics_hash: string;
@@ -105,6 +106,7 @@ export type Database = {
         };
         Insert: {
           created_at?: string;
+          created_by?: string;
           id?: string;
           line_word_counts?: Json;
           lyrics_hash: string;
@@ -117,6 +119,7 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+          created_by?: string;
           id?: string;
           line_word_counts?: Json;
           lyrics_hash?: string;
@@ -243,6 +246,7 @@ export type Database = {
           album_name: string | null;
           artist: string | null;
           created_at: string;
+          created_by: string;
           duration_ms: number | null;
           id: string;
           source: string;
@@ -257,6 +261,7 @@ export type Database = {
           album_name?: string | null;
           artist?: string | null;
           created_at?: string;
+          created_by?: string;
           duration_ms?: number | null;
           id?: string;
           source?: string;
@@ -271,6 +276,7 @@ export type Database = {
           album_name?: string | null;
           artist?: string | null;
           created_at?: string;
+          created_by?: string;
           duration_ms?: number | null;
           id?: string;
           source?: string;

@@ -301,6 +301,18 @@ function isMissingTargetNotesError(error: { message?: string } | null) {
   return message.includes("target_notes") || message.includes("schema cache");
 }
 
+function isMissingNewSchemaError(error: { message?: string } | null) {
+  const message = error?.message?.toLowerCase() ?? "";
+  return (
+    message.includes("schema cache") ||
+    message.includes("could not find the table") ||
+    message.includes("could not find the") ||
+    message.includes("user_songs") ||
+    message.includes("lyrics_documents") ||
+    message.includes("tracks")
+  );
+}
+
 function formatDuration(ms?: number) {
   if (!ms) {
     return "0:00";
@@ -429,7 +441,7 @@ function songToDraft(song: Song): SongDraft {
 function buildSongFromDraft(draft: SongDraft, fallbackTitle: string, existingSong?: Song): Song {
   const now = new Date().toISOString();
   const id = existingSong?.id ?? createId();
-  const lyrics = buildLyrics(draft.lyricsText, existingSong?.lyrics, id);
+  const lyrics = buildLyrics(draft.lyricsText, existingSong?.lyrics);
 
   return {
     id,
@@ -1783,7 +1795,101 @@ export function VocalMapApp({
     throw insertedDocument.error ?? new Error("Lyrics document insert failed.");
   }
 
-  async function persistSong(song: Song) {
+  async function persistLegacySong(song: Song, existingSong?: Song) {
+    const songRow: TablesInsert<"songs"> = {
+      id: song.id,
+      user_id: userId,
+      title: song.title,
+      artist: song.artist ?? null,
+      album_name: song.albumName ?? null,
+      album_art_url: song.albumArtUrl ?? null,
+      spotify_track_id: song.spotifyTrackId ?? null,
+      spotify_url: song.spotifyUrl ?? null,
+      duration_ms: song.durationMs ?? null,
+      source_lyrics_text: song.sourceLyricsText
+    };
+
+    const keepLineIds = song.lyrics.map((line) => line.id);
+    const keepWordIds = song.lyrics.flatMap((line) => line.words.map((word) => word.id));
+    const lineRows: TablesInsert<"lyric_lines">[] = song.lyrics.map((line, position) => ({
+      id: line.id,
+      song_id: song.id,
+      user_id: userId,
+      position,
+      text: line.text
+    }));
+    const wordRows: TablesInsert<"lyric_words">[] = song.lyrics.flatMap((line) =>
+      line.words.map((word, position) => ({
+        id: word.id,
+        line_id: line.id,
+        song_id: song.id,
+        user_id: userId,
+        position,
+        text: word.text
+      }))
+    );
+
+    const { error: songError } = await supabase.from("songs").upsert(songRow);
+    if (songError) {
+      throw songError;
+    }
+
+    if (existingSong) {
+      if (keepWordIds.length > 0) {
+        const { error } = await supabase.from("lyric_words").delete().eq("song_id", song.id).not("id", "in", `(${keepWordIds.join(",")})`);
+        if (error) {
+          throw error;
+        }
+      } else {
+        const { error } = await supabase.from("lyric_words").delete().eq("song_id", song.id);
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (keepLineIds.length > 0) {
+        const { error } = await supabase.from("lyric_lines").delete().eq("song_id", song.id).not("id", "in", `(${keepLineIds.join(",")})`);
+        if (error) {
+          throw error;
+        }
+      } else {
+        const { error } = await supabase.from("lyric_lines").delete().eq("song_id", song.id);
+        if (error) {
+          throw error;
+        }
+      }
+    }
+
+    if (lineRows.length > 0) {
+      const { error } = await supabase.from("lyric_lines").upsert(lineRows);
+      if (error) {
+        throw error;
+      }
+    }
+
+    if (wordRows.length > 0) {
+      const { error } = await supabase.from("lyric_words").upsert(wordRows);
+      if (error) {
+        throw error;
+      }
+    }
+
+    return { trackId: undefined, lyricsDocumentId: undefined };
+  }
+
+  async function persistSong(song: Song, existingSong?: Song) {
+    try {
+      return await persistNormalizedSong(song);
+    } catch (error) {
+      if (isMissingNewSchemaError(error as { message?: string })) {
+        return persistLegacySong(song, existingSong);
+      }
+
+      throw error;
+    }
+  }
+
+  async function persistNormalizedSong(song: Song) {
     const trackId = await findOrCreateTrack(song);
     const lyricsDocumentId = await findOrCreateLyricsDocument(song, trackId);
     const songRow: TablesInsert<"user_songs"> = {
@@ -1814,7 +1920,7 @@ export function VocalMapApp({
 
     setIsSaving(true);
     try {
-      const persistedSong = await persistSong(song);
+      const persistedSong = await persistSong(song, existingSong);
       await deleteStoragePaths(collectRemovedAudioPaths(existingSong, song));
       let nextSong = {
         ...song,
@@ -1864,7 +1970,12 @@ export function VocalMapApp({
       return;
     }
 
-    const { error } = await supabase.from("user_songs").delete().eq("id", song.id).eq("user_id", userId);
+    let { error } = await supabase.from("user_songs").delete().eq("id", song.id).eq("user_id", userId);
+    if (isMissingNewSchemaError(error)) {
+      const legacyResult = await supabase.from("songs").delete().eq("id", song.id).eq("user_id", userId);
+      error = legacyResult.error;
+    }
+
     if (error) {
       setStatusMessage(t("deleteFailed"));
       return;
@@ -2546,6 +2657,9 @@ export function VocalMapApp({
       if (selectedData.type !== "range" || selectedData.wordTargets.length === 0) {
         return;
       }
+      if (!activeSong) {
+        return;
+      }
 
       const noteByWordId = new Map<string, TextNote>();
       const rows: TablesInsert<"target_notes">[] = selectedData.wordTargets.map((target) => {
@@ -2560,16 +2674,24 @@ export function VocalMapApp({
         return {
           id: note.id,
           user_id: userId,
-          user_song_id: selection.songId,
-          line_index: target.lineIndex,
-          word_index: target.wordIndex,
+          ...(activeSong.lyricsDocumentId
+            ? {
+                user_song_id: selection.songId,
+                line_index: target.lineIndex,
+                word_index: target.wordIndex
+              }
+            : {
+                song_id: selection.songId,
+                line_id: target.lineId,
+                word_id: target.wordId
+              }),
           target_type: "word",
           text
         };
       });
 
       const { error } = await supabase.from("target_notes").upsert(rows, {
-        onConflict: "user_id,target_type,user_song_id,line_index,word_index"
+        onConflict: activeSong.lyricsDocumentId ? "user_id,target_type,user_song_id,line_index,word_index" : "user_id,target_type,song_id,line_id,word_id"
       });
       if (error) {
         if (!isMissingTargetNotesError(error)) {
@@ -2636,15 +2758,23 @@ export function VocalMapApp({
     const row: TablesInsert<"target_notes"> = {
       id: textNote.id,
       user_id: userId,
-      user_song_id: targetCoordinates.userSongId,
-      line_index: targetCoordinates.lineIndex,
-      word_index: targetCoordinates.wordIndex,
+      ...(activeSong.lyricsDocumentId
+        ? {
+            user_song_id: targetCoordinates.userSongId,
+            line_index: targetCoordinates.lineIndex,
+            word_index: targetCoordinates.wordIndex
+          }
+        : {
+            song_id: selection.songId,
+            line_id: selection.lineId,
+            word_id: selection.type === "word" ? selection.wordId : null
+          }),
       target_type: selection.type,
       text
     };
 
     const { error } = await supabase.from("target_notes").upsert(row, {
-      onConflict: "user_id,target_type,user_song_id,line_index,word_index"
+      onConflict: activeSong.lyricsDocumentId ? "user_id,target_type,user_song_id,line_index,word_index" : "user_id,target_type,song_id,line_id,word_id"
     });
     if (error) {
       if (!isMissingTargetNotesError(error)) {
@@ -2716,9 +2846,17 @@ export function VocalMapApp({
         return {
           id: annotationId,
           user_id: userId,
-          user_song_id: selection.songId,
-          line_index: target.lineIndex,
-          word_index: target.wordIndex,
+          ...(activeSong.lyricsDocumentId
+            ? {
+                user_song_id: selection.songId,
+                line_index: target.lineIndex,
+                word_index: target.wordIndex
+              }
+            : {
+                song_id: selection.songId,
+                line_id: target.lineId,
+                word_id: target.wordId
+              }),
           target_type: "word",
           marker_id: markerId
         };
@@ -2766,9 +2904,17 @@ export function VocalMapApp({
     const annotationRow: TablesInsert<"annotations"> = {
       id: annotationId,
       user_id: userId,
-      user_song_id: targetCoordinates.userSongId,
-      line_index: targetCoordinates.lineIndex,
-      word_index: targetCoordinates.wordIndex,
+      ...(activeSong.lyricsDocumentId
+        ? {
+            user_song_id: targetCoordinates.userSongId,
+            line_index: targetCoordinates.lineIndex,
+            word_index: targetCoordinates.wordIndex
+          }
+        : {
+            song_id: selection.songId,
+            line_id: selection.lineId,
+            word_id: selection.type === "word" ? selection.wordId ?? null : null
+          }),
       target_type: selection.type,
       marker_id: markerId
     };
@@ -2819,19 +2965,44 @@ export function VocalMapApp({
       }
     }
 
+    const useNormalizedAudio = Boolean(targetSong?.lyricsDocumentId) || !targetSong;
     const row: TablesInsert<"audio_references"> = {
       id: audioReference.id,
       user_id: userId,
-      user_song_id: target.songId,
-      line_index: targetCoordinates?.lineIndex ?? null,
-      word_index: targetCoordinates?.wordIndex ?? null,
+      ...(useNormalizedAudio
+        ? {
+            user_song_id: target.songId,
+            line_index: targetCoordinates?.lineIndex ?? null,
+            word_index: targetCoordinates?.wordIndex ?? null
+          }
+        : {
+            song_id: target.songId,
+            line_id: target.type === "line" || target.type === "word" ? target.lineId : null,
+            word_id: target.type === "word" ? target.wordId ?? null : null
+          }),
       target_type: target.type,
       storage_path: audioReference.storagePath,
       mime_type: audioReference.mimeType,
       size_bytes: audioReference.sizeBytes ?? null
     };
 
-    const { error } = await supabase.from("audio_references").insert(row);
+    let { error } = await supabase.from("audio_references").insert(row);
+    if (useNormalizedAudio && isMissingNewSchemaError(error)) {
+      const legacyRow: TablesInsert<"audio_references"> = {
+        id: audioReference.id,
+        user_id: userId,
+        song_id: target.songId,
+        line_id: target.type === "line" || target.type === "word" ? target.lineId : null,
+        word_id: target.type === "word" ? target.wordId ?? null : null,
+        target_type: target.type,
+        storage_path: audioReference.storagePath,
+        mime_type: audioReference.mimeType,
+        size_bytes: audioReference.sizeBytes ?? null
+      };
+      const legacyResult = await supabase.from("audio_references").insert(legacyRow);
+      error = legacyResult.error;
+    }
+
     if (error) {
       throw error;
     }

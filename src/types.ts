@@ -63,6 +63,7 @@ export type MarkerIconName =
 
 export type Marker = {
   id: string;
+  code?: string;
   label: string;
   meaning: string;
   color: string;

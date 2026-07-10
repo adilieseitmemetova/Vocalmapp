@@ -229,7 +229,7 @@ export type Database = {
           color: string;
           created_at?: string;
           icon: string;
-          id: string;
+          id?: string;
           is_system?: boolean;
           label: string;
           meaning: string;

@@ -112,6 +112,7 @@ function optionalTargetNotes(result: { data: TextNoteRow[] | null; error: { mess
 function toMarker(row: MarkerRow): Marker {
   return {
     id: row.id,
+    code: row.code ?? (row.is_system ? row.id : undefined),
     label: row.label,
     meaning: row.meaning,
     color: row.color,

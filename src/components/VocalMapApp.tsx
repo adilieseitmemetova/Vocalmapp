@@ -123,7 +123,7 @@ const spotifySearchErrorMessageKeys: Record<SpotifySearchErrorCode, string> = {
   missingCredentials: "spotifyMissingCredentials",
   unavailable: "spotifyUnavailable"
 };
-const systemMarkerIds = new Set([
+const systemMarkerCodes = new Set([
   "up",
   "down",
   "vib",
@@ -209,6 +209,34 @@ function applyMarkerOrder(markers: Marker[], markerOrderIds: string[]) {
 
     return firstIndex - secondIndex;
   });
+}
+
+function markerIdForPreferenceKey(markers: Marker[], key: string) {
+  if (markers.some((marker) => marker.id === key)) {
+    return key;
+  }
+
+  return markers.find((marker) => marker.isSystem && marker.code === key)?.id ?? key;
+}
+
+function normalizeMarkerPreferenceIds(markers: Marker[], markerIds: string[]) {
+  const knownMarkerIds = new Set(markers.map((marker) => marker.id));
+  const normalizedIds = markerIds.map((id) => markerIdForPreferenceKey(markers, id)).filter((id) => knownMarkerIds.has(id));
+  return Array.from(new Set(normalizedIds));
+}
+
+function normalizeSystemMarkerOverrides(markers: Marker[], overrides: Record<string, MarkerDraft>) {
+  const nextOverrides: Record<string, MarkerDraft> = {};
+
+  for (const [key, value] of Object.entries(overrides)) {
+    const markerId = markerIdForPreferenceKey(markers, key);
+    const marker = markers.find((item) => item.id === markerId);
+    if (marker?.isSystem) {
+      nextOverrides[marker.id] = value;
+    }
+  }
+
+  return nextOverrides;
 }
 
 function clampLyricTextSize(size: number) {
@@ -1219,15 +1247,16 @@ export function VocalMapApp({
   const supabase = useMemo(() => createClient(), []);
   const translatedInitialMarkers = useMemo(
     () =>
-      initialData.markers.map((marker) =>
-        marker.isSystem && systemMarkerIds.has(marker.id)
+      initialData.markers.map((marker) => {
+        const markerCode = marker.code;
+        return marker.isSystem && markerCode && systemMarkerCodes.has(markerCode)
           ? {
               ...marker,
-              label: t(`systemMarkers.${marker.id}.label`),
-              meaning: t(`systemMarkers.${marker.id}.meaning`)
+              label: t(`systemMarkers.${markerCode}.label`),
+              meaning: t(`systemMarkers.${markerCode}.meaning`)
             }
-          : marker
-      ),
+          : marker;
+      }),
     [initialData.markers, t]
   );
   const [songs, setSongs] = useState<Song[]>(initialData.songs);
@@ -1398,9 +1427,9 @@ export function VocalMapApp({
 
       try {
         const parsedPreferences = JSON.parse(storedPreferences) as Partial<MarkerPreferences>;
-        const nextHiddenIds = new Set(parsedPreferences.hiddenSystemMarkerIds ?? []);
-        const nextOverrides = parsedPreferences.systemOverrides ?? {};
-        const nextOrderIds = parsedPreferences.markerOrderIds ?? [];
+        const nextHiddenIds = new Set(normalizeMarkerPreferenceIds(translatedInitialMarkers, parsedPreferences.hiddenSystemMarkerIds ?? []));
+        const nextOverrides = normalizeSystemMarkerOverrides(translatedInitialMarkers, parsedPreferences.systemOverrides ?? {});
+        const nextOrderIds = normalizeMarkerPreferenceIds(translatedInitialMarkers, parsedPreferences.markerOrderIds ?? []);
 
         setHiddenSystemMarkerIds(nextHiddenIds);
         setSystemMarkerOverrides(nextOverrides);
@@ -1420,7 +1449,7 @@ export function VocalMapApp({
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [userId]);
+  }, [translatedInitialMarkers, userId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {

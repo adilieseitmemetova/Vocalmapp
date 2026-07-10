@@ -62,9 +62,34 @@ import {
 import type { ComponentType } from "react";
 import type { Marker, MarkerIconName } from "./types";
 
+const SYSTEM_MARKER_IDS = {
+  up: "34f85819-dcd5-4b7f-9b87-cbee1db85a25",
+  down: "82004da2-f63f-48e7-9b82-63c2a91c301e",
+  vib: "303b12be-046c-4a45-ac77-cf9f60b547b0",
+  hold: "284ca9bc-c5a5-4db3-8cb6-edf24503ec3a",
+  breath: "2072f47a-2598-4ba9-8a1e-67dea4335a43",
+  accent: "2ccfea58-2b63-44c1-a040-40732059f846",
+  soft: "ce75d279-28ff-4a4f-be74-44c66b3857a5",
+  strong: "cc9803f3-931b-4529-893b-be366da4acbc",
+  slideUp: "1966ec87-3456-4e0e-afbe-482080a6f1bf",
+  slideDown: "6b282870-226c-4b9e-8f3d-6bb7a1b6ee98",
+  legato: "127094a9-16ad-4f42-b028-78d0a9f3800c",
+  pause: "de929752-6e49-4e8e-8161-88ff6d3a5ce5",
+  cut: "857c0b2b-2b65-43cf-af5e-0225f1d140b7",
+  run: "4cb865a7-978c-40d3-832e-2def53d5e162",
+  mix: "a31c20a8-a098-4663-8f86-10a4e0fefc19",
+  head: "419e0b18-7050-47cb-b71d-89bc89c1c295",
+  chest: "4132a919-5641-414f-807a-b2f2c946d828",
+  falsetto: "fedc613b-7f55-4a6e-b695-a359e7c8e838",
+  twang: "76358f71-404f-46b8-835d-2c15f68ce660",
+  cry: "8e1a09fe-fd69-4d48-b4ba-e3eac08cea01",
+  mute: "cf2ae020-9b52-44f7-8f9d-fc91ff2e3654"
+} as const;
+
 export const DEFAULT_MARKERS: Marker[] = [
   {
-    id: "up",
+    id: SYSTEM_MARKER_IDS.up,
+    code: "up",
     label: "Up",
     meaning: "Pitch rises",
     color: "#1aae39",
@@ -72,7 +97,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "down",
+    id: SYSTEM_MARKER_IDS.down,
+    code: "down",
     label: "Down",
     meaning: "Pitch falls",
     color: "#0075de",
@@ -80,7 +106,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "vib",
+    id: SYSTEM_MARKER_IDS.vib,
+    code: "vib",
     label: "Vib",
     meaning: "Vibrato",
     color: "#8f4fd7",
@@ -88,7 +115,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "hold",
+    id: SYSTEM_MARKER_IDS.hold,
+    code: "hold",
     label: "Hold",
     meaning: "Sustain the sound",
     color: "#c69214",
@@ -96,7 +124,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "breath",
+    id: SYSTEM_MARKER_IDS.breath,
+    code: "breath",
     label: "Breath",
     meaning: "Take a breath",
     color: "#2a9d99",
@@ -104,7 +133,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "accent",
+    id: SYSTEM_MARKER_IDS.accent,
+    code: "accent",
     label: "Accent",
     meaning: "Emphasize this sound",
     color: "#dc2f2f",
@@ -112,7 +142,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "soft",
+    id: SYSTEM_MARKER_IDS.soft,
+    code: "soft",
     label: "Soft",
     meaning: "Sing gently",
     color: "#ff64c8",
@@ -120,7 +151,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "strong",
+    id: SYSTEM_MARKER_IDS.strong,
+    code: "strong",
     label: "Strong",
     meaning: "Add strength",
     color: "#dd5b00",
@@ -128,7 +160,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "slide-up",
+    id: SYSTEM_MARKER_IDS.slideUp,
+    code: "slide-up",
     label: "Slide up",
     meaning: "Slide upward",
     color: "#178a2f",
@@ -136,7 +169,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "slide-down",
+    id: SYSTEM_MARKER_IDS.slideDown,
+    code: "slide-down",
     label: "Slide down",
     meaning: "Slide downward",
     color: "#1d6fbd",
@@ -144,7 +178,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "legato",
+    id: SYSTEM_MARKER_IDS.legato,
+    code: "legato",
     label: "Legato",
     meaning: "Connect smoothly without a break",
     color: "#6b58c8",
@@ -152,7 +187,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "pause",
+    id: SYSTEM_MARKER_IDS.pause,
+    code: "pause",
     label: "Pause",
     meaning: "Pause or slow down",
     color: "#615d59",
@@ -160,7 +196,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "cut",
+    id: SYSTEM_MARKER_IDS.cut,
+    code: "cut",
     label: "Cut",
     meaning: "Release the sound quickly",
     color: "#9b2f2f",
@@ -168,7 +205,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "run",
+    id: SYSTEM_MARKER_IDS.run,
+    code: "run",
     label: "Run",
     meaning: "Melisma or vocal run",
     color: "#007a7a",
@@ -176,7 +214,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "mix",
+    id: SYSTEM_MARKER_IDS.mix,
+    code: "mix",
     label: "Mix",
     meaning: "Mixed voice",
     color: "#7a48aa",
@@ -184,7 +223,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "head",
+    id: SYSTEM_MARKER_IDS.head,
+    code: "head",
     label: "Head",
     meaning: "Head voice",
     color: "#4a85d8",
@@ -192,7 +232,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "chest",
+    id: SYSTEM_MARKER_IDS.chest,
+    code: "chest",
     label: "Chest",
     meaning: "Chest voice",
     color: "#8a4b24",
@@ -200,7 +241,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "falsetto",
+    id: SYSTEM_MARKER_IDS.falsetto,
+    code: "falsetto",
     label: "Falsetto",
     meaning: "Falsetto",
     color: "#c45aa0",
@@ -208,7 +250,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "twang",
+    id: SYSTEM_MARKER_IDS.twang,
+    code: "twang",
     label: "Twang",
     meaning: "Bright twang tone",
     color: "#b76a00",
@@ -216,7 +259,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "cry",
+    id: SYSTEM_MARKER_IDS.cry,
+    code: "cry",
     label: "Cry",
     meaning: "Crying tone",
     color: "#5b70c8",
@@ -224,7 +268,8 @@ export const DEFAULT_MARKERS: Marker[] = [
     isSystem: true
   },
   {
-    id: "mute",
+    id: SYSTEM_MARKER_IDS.mute,
+    code: "mute",
     label: "Mute",
     meaning: "Sing quieter or remove extra sound",
     color: "#6d6a65",

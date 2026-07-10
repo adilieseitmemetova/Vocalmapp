@@ -118,6 +118,8 @@ export type LyricLine = {
 
 export type Song = {
   id: string;
+  trackId?: string;
+  lyricsDocumentId?: string;
   title: string;
   artist?: string;
   albumName?: string;

@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ArrowDown,
+  ArrowUp,
   Ellipsis,
   ExternalLink,
   FileText,
@@ -29,8 +31,10 @@ import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import {
+  LYRICS_TOKENIZER_VERSION,
   buildLyrics,
   findLyricsForTrack,
+  lineWordCountsFromText,
   lyricsTextFromMatch,
   lyricsToText,
   searchLyricsCatalog,
@@ -88,11 +92,14 @@ const EMPTY_CUSTOM_MARKER: { label: string; meaning: string; color: string; icon
   color: "#7a48aa",
   icon: "spark"
 };
+const FALLBACK_MARKER_ICON: MarkerIconName = "spark";
+const LEGACY_MARKER_ICONS = new Set<MarkerIconName>(["up", "down", "wave", "line", "breath", "accent", "soft", "strong", "pause", "cut", "repeat", "spark", "volume", "mute"]);
 
 type MarkerDraft = typeof EMPTY_CUSTOM_MARKER;
 type MarkerPreferences = {
   hiddenSystemMarkerIds: string[];
   systemOverrides: Record<string, MarkerDraft>;
+  markerOrderIds: string[];
 };
 type SettingsPanel = "markers" | "lyrics";
 type AudioProvider = "spotify" | "file";
@@ -167,6 +174,41 @@ function lyricLineSpacingStorageKey(userId: string) {
 
 function lyricWordSpacingStorageKey(userId: string) {
   return `${LYRIC_WORD_SPACING_STORAGE_PREFIX}:${userId}`;
+}
+
+function shouldRetryMarkerIcon(error: { message?: string } | null, icon: MarkerIconName) {
+  if (!error || LEGACY_MARKER_ICONS.has(icon)) {
+    return false;
+  }
+
+  const message = error.message?.toLowerCase() ?? "";
+  return message.includes("markers_icon_allowed") || message.includes("check constraint");
+}
+
+function applyMarkerOrder(markers: Marker[], markerOrderIds: string[]) {
+  if (markerOrderIds.length === 0) {
+    return markers;
+  }
+
+  const orderIndexById = new Map(markerOrderIds.map((id, index) => [id, index]));
+  return [...markers].sort((firstMarker, secondMarker) => {
+    const firstIndex = orderIndexById.get(firstMarker.id);
+    const secondIndex = orderIndexById.get(secondMarker.id);
+
+    if (firstIndex === undefined && secondIndex === undefined) {
+      return 0;
+    }
+
+    if (firstIndex === undefined) {
+      return 1;
+    }
+
+    if (secondIndex === undefined) {
+      return -1;
+    }
+
+    return firstIndex - secondIndex;
+  });
 }
 
 function clampLyricTextSize(size: number) {
@@ -386,10 +428,13 @@ function songToDraft(song: Song): SongDraft {
 
 function buildSongFromDraft(draft: SongDraft, fallbackTitle: string, existingSong?: Song): Song {
   const now = new Date().toISOString();
-  const lyrics = buildLyrics(draft.lyricsText, existingSong?.lyrics);
+  const id = existingSong?.id ?? createId();
+  const lyrics = buildLyrics(draft.lyricsText, existingSong?.lyrics, id);
 
   return {
-    id: existingSong?.id ?? createId(),
+    id,
+    trackId: existingSong?.trackId,
+    lyricsDocumentId: existingSong?.lyricsDocumentId,
     title: draft.title.trim() || fallbackTitle,
     artist: draft.artist.trim() || undefined,
     albumName: draft.albumName,
@@ -405,11 +450,28 @@ function buildSongFromDraft(draft: SongDraft, fallbackTitle: string, existingSon
   };
 }
 
+async function sha256Hex(value: string) {
+  if (!crypto.subtle) {
+    throw new Error("Web Crypto is required to hash lyrics.");
+  }
+
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 type SelectedWordAddress = {
   line: LyricLine;
   word: LyricWord;
   lineIndex: number;
   wordIndex: number;
+};
+
+type TargetCoordinates = {
+  userSongId: string;
+  lineIndex: number;
+  wordIndex: number | null;
 };
 
 type SelectedData =
@@ -434,6 +496,8 @@ type SelectedData =
       wordTargets: Array<{
         lineId: string;
         wordId: string;
+        lineIndex: number;
+        wordIndex: number;
         annotations: WordAnnotation[];
         textNote?: TextNote;
       }>;
@@ -489,6 +553,32 @@ function selectedWordAddresses(song: Song, selection: LyricsSelection | null) {
   const startIndex = Math.min(anchorIndex, focusIndex);
   const endIndex = Math.max(anchorIndex, focusIndex);
   return addresses.slice(startIndex, endIndex + 1);
+}
+
+function getTargetCoordinates(song: Song, target: SelectedTarget): TargetCoordinates | null {
+  const lineIndex = song.lyrics.findIndex((line) => line.id === target.lineId);
+  if (lineIndex < 0) {
+    return null;
+  }
+
+  if (target.type === "line") {
+    return {
+      userSongId: song.id,
+      lineIndex,
+      wordIndex: null
+    };
+  }
+
+  const wordIndex = song.lyrics[lineIndex]?.words.findIndex((word) => word.id === target.wordId) ?? -1;
+  if (wordIndex < 0) {
+    return null;
+  }
+
+  return {
+    userSongId: song.id,
+    lineIndex,
+    wordIndex
+  };
 }
 
 function buildRangeLabel(addresses: SelectedWordAddress[]) {
@@ -613,6 +703,8 @@ function findSelectedData(song: Song | undefined, selection: LyricsSelection | n
       wordTargets: addresses.map((address) => ({
         lineId: address.line.id,
         wordId: address.word.id,
+        lineIndex: address.lineIndex,
+        wordIndex: address.wordIndex,
         annotations: address.word.annotations,
         textNote: address.word.textNote
       }))
@@ -879,7 +971,6 @@ function LyricsLine({
 function SongMenuCard({
   song,
   onUpload,
-  onRemove,
   onEdit,
   onDelete,
   optionsOpen,
@@ -888,7 +979,6 @@ function SongMenuCard({
 }: {
   song: Song;
   onUpload: (song: Song, file: File) => void;
-  onRemove: (song: Song, audioReference: AudioReference) => void;
   onEdit: (song: Song) => void;
   onDelete: (song: Song) => void;
   optionsOpen: boolean;
@@ -902,7 +992,6 @@ function SongMenuCard({
     addFile: string;
     edit: string;
     delete: string;
-    deleteAudio: string;
   };
 }) {
   return (
@@ -974,20 +1063,6 @@ function SongMenuCard({
         </label>
       </div>
 
-      {song.songAudios.length > 0 ? (
-        <div className="grid gap-2">
-          {song.songAudios.map((audioReference, index) => (
-            <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50 px-2 py-1.5" key={audioReference.id}>
-              <span className="truncate text-xs font-medium text-stone-700">
-                {labels.addFile} {index + 1}
-              </span>
-              <button className={`${iconButtonClass} size-8 rounded-full text-red-700`} type="button" onClick={() => onRemove(song, audioReference)} title={labels.deleteAudio}>
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -999,6 +1074,7 @@ function AudioProviderDock({
   sidebarCollapsed,
   onProviderChange,
   onSelectedAudioChange,
+  onRemove,
   supabase,
   labels
 }: {
@@ -1008,6 +1084,7 @@ function AudioProviderDock({
   sidebarCollapsed: boolean;
   onProviderChange: (provider: AudioProvider) => void;
   onSelectedAudioChange: (audioId: string) => void;
+  onRemove: (song: Song, audioReference: AudioReference) => void;
   supabase: ReturnType<typeof createClient>;
   labels: {
     nowPlaying: string;
@@ -1015,6 +1092,7 @@ function AudioProviderDock({
     file: string;
     fileSelect: string;
     noFile: string;
+    deleteAudio: string;
     spotifyTitle: string;
   };
 }) {
@@ -1081,7 +1159,14 @@ function AudioProviderDock({
         ) : null}
         {provider === "file" ? (
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-            {fileUrl ? <audio className="h-10 w-full" controls src={fileUrl} /> : <p className="text-sm text-stone-500">{labels.noFile}</p>}
+            <div className="flex min-w-0 items-center gap-2">
+              {fileUrl ? <audio className="h-10 min-w-0 flex-1" controls src={fileUrl} /> : <p className="min-w-0 flex-1 text-sm text-stone-500">{labels.noFile}</p>}
+              {activeAudio ? (
+                <button className={`${iconButtonClass} size-10 flex-none rounded-full text-red-700`} type="button" onClick={() => onRemove(song, activeAudio)} title={labels.deleteAudio}>
+                  <Trash2 size={15} />
+                </button>
+              ) : null}
+            </div>
             {song.songAudios.length > 1 ? (
               <select
                 className="h-10 rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
@@ -1135,6 +1220,7 @@ export function VocalMapApp({
   );
   const [songs, setSongs] = useState<Song[]>(initialData.songs);
   const [markers, setMarkers] = useState<Marker[]>(translatedInitialMarkers);
+  const [markerOrderIds, setMarkerOrderIds] = useState<string[]>(() => translatedInitialMarkers.map((marker) => marker.id));
   const [customMarkerDraft, setCustomMarkerDraft] = useState(EMPTY_CUSTOM_MARKER);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -1302,14 +1388,19 @@ export function VocalMapApp({
         const parsedPreferences = JSON.parse(storedPreferences) as Partial<MarkerPreferences>;
         const nextHiddenIds = new Set(parsedPreferences.hiddenSystemMarkerIds ?? []);
         const nextOverrides = parsedPreferences.systemOverrides ?? {};
+        const nextOrderIds = parsedPreferences.markerOrderIds ?? [];
 
         setHiddenSystemMarkerIds(nextHiddenIds);
         setSystemMarkerOverrides(nextOverrides);
+        setMarkerOrderIds((currentOrderIds) => (nextOrderIds.length > 0 ? nextOrderIds : currentOrderIds));
         setMarkers((currentMarkers) =>
-          currentMarkers.map((marker) => {
-            const override = nextOverrides[marker.id];
-            return marker.isSystem && override ? { ...marker, ...override } : marker;
-          })
+          applyMarkerOrder(
+            currentMarkers.map((marker) => {
+              const override = nextOverrides[marker.id];
+              return marker.isSystem && override ? { ...marker, ...override } : marker;
+            }),
+            nextOrderIds
+          )
         );
       } catch {
         localStorage.removeItem(markerPreferencesKey(userId));
@@ -1384,8 +1475,10 @@ export function VocalMapApp({
             ? "spotify"
             : null;
   const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
-  const visibleMarkers = useMemo(() => markers.filter((marker) => !marker.isSystem || !hiddenSystemMarkerIds.has(marker.id)), [hiddenSystemMarkerIds, markers]);
+  const orderedMarkers = useMemo(() => applyMarkerOrder(markers, markerOrderIds), [markerOrderIds, markers]);
+  const visibleMarkers = useMemo(() => orderedMarkers.filter((marker) => !marker.isSystem || !hiddenSystemMarkerIds.has(marker.id)), [hiddenSystemMarkerIds, orderedMarkers]);
   const selectedMarker = useMemo(() => visibleMarkers.find((marker) => marker.id === selectedMarkerId) ?? null, [selectedMarkerId, visibleMarkers]);
+  const selectedMarkerIndex = useMemo(() => visibleMarkers.findIndex((marker) => marker.id === selectedMarkerId), [selectedMarkerId, visibleMarkers]);
   const selectedData = useMemo(() => findSelectedData(activeSong, selection, common("emptyLine")), [activeSong, common, selection]);
   const selectedWordIds = useMemo(() => new Set(activeSong ? selectedWordAddresses(activeSong, selection).map((address) => address.word.id) : []), [activeSong, selection]);
   const selectedLineId = selection?.type === "line" ? selection.lineId : null;
@@ -1472,12 +1565,46 @@ export function VocalMapApp({
     setSelection(null);
   }
 
-  function persistMarkerPreferences(nextHiddenIds: Set<string>, nextOverrides: Record<string, MarkerDraft>) {
+  function persistMarkerPreferences(nextHiddenIds: Set<string>, nextOverrides: Record<string, MarkerDraft>, nextOrderIds = markerOrderIds) {
     const preferences: MarkerPreferences = {
       hiddenSystemMarkerIds: Array.from(nextHiddenIds),
-      systemOverrides: nextOverrides
+      systemOverrides: nextOverrides,
+      markerOrderIds: nextOrderIds
     };
     localStorage.setItem(markerPreferencesKey(userId), JSON.stringify(preferences));
+  }
+
+  async function persistCustomMarkerOrder(nextMarkers: Marker[]) {
+    const results = await Promise.all(
+      nextMarkers.map((marker, index) =>
+        marker.isSystem ? Promise.resolve({ error: null }) : supabase.from("markers").update({ sort_order: index + 1 }).eq("id", marker.id).eq("user_id", userId)
+      )
+    );
+
+    if (results.some((result) => result.error)) {
+      setStatusMessage(t("saveFailed"));
+    }
+  }
+
+  function moveMarker(markerId: string, offset: -1 | 1) {
+    const currentIndex = visibleMarkers.findIndex((marker) => marker.id === markerId);
+    const targetIndex = currentIndex + offset;
+
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= visibleMarkers.length) {
+      return;
+    }
+
+    const nextVisibleMarkers = [...visibleMarkers];
+    [nextVisibleMarkers[currentIndex], nextVisibleMarkers[targetIndex]] = [nextVisibleMarkers[targetIndex], nextVisibleMarkers[currentIndex]];
+
+    const visibleMarkerIds = new Set(nextVisibleMarkers.map((marker) => marker.id));
+    const nextOrderIds = [...nextVisibleMarkers.map((marker) => marker.id), ...orderedMarkers.filter((marker) => !visibleMarkerIds.has(marker.id)).map((marker) => marker.id)];
+    const nextMarkers = applyMarkerOrder(markers, nextOrderIds);
+
+    setMarkerOrderIds(nextOrderIds);
+    setMarkers(nextMarkers);
+    persistMarkerPreferences(hiddenSystemMarkerIds, systemMarkerOverrides, nextOrderIds);
+    void persistCustomMarkerOrder(nextMarkers);
   }
 
   function openMarkerCreate() {
@@ -1558,84 +1685,127 @@ export function VocalMapApp({
     setIsProfileModalOpen(false);
   }
 
-  async function persistSong(song: Song, existingSong?: Song) {
-    const songRow: TablesInsert<"songs"> = {
+  async function findOrCreateTrack(song: Song) {
+    const source = song.spotifyTrackId ? "spotify" : "manual";
+    const sourceTrackId = song.spotifyTrackId ?? null;
+
+    if (sourceTrackId) {
+      const existingTrack = await supabase.from("tracks").select("id").eq("source", source).eq("source_track_id", sourceTrackId).maybeSingle();
+      if (existingTrack.error) {
+        throw existingTrack.error;
+      }
+      if (existingTrack.data?.id) {
+        return existingTrack.data.id;
+      }
+
+      const existingSpotifyTrack = await supabase.from("tracks").select("id").eq("spotify_track_id", sourceTrackId).maybeSingle();
+      if (existingSpotifyTrack.error) {
+        throw existingSpotifyTrack.error;
+      }
+      if (existingSpotifyTrack.data?.id) {
+        return existingSpotifyTrack.data.id;
+      }
+    }
+
+    const trackRow: TablesInsert<"tracks"> = {
+      source,
+      source_track_id: sourceTrackId,
+      spotify_track_id: song.spotifyTrackId ?? null,
+      title: song.title,
+      artist: song.artist ?? null,
+      album_name: song.albumName ?? null,
+      album_art_url: song.albumArtUrl ?? null,
+      spotify_url: song.spotifyUrl ?? null,
+      duration_ms: song.durationMs ?? null
+    };
+    const insertedTrack = await supabase.from("tracks").insert(trackRow).select("id").single();
+
+    if (!insertedTrack.error && insertedTrack.data?.id) {
+      return insertedTrack.data.id;
+    }
+
+    if (sourceTrackId) {
+      const retryTrack = await supabase.from("tracks").select("id").eq("source", source).eq("source_track_id", sourceTrackId).maybeSingle();
+      if (!retryTrack.error && retryTrack.data?.id) {
+        return retryTrack.data.id;
+      }
+
+      const retrySpotifyTrack = await supabase.from("tracks").select("id").eq("spotify_track_id", sourceTrackId).maybeSingle();
+      if (!retrySpotifyTrack.error && retrySpotifyTrack.data?.id) {
+        return retrySpotifyTrack.data.id;
+      }
+    }
+
+    throw insertedTrack.error ?? new Error("Track insert failed.");
+  }
+
+  async function findOrCreateLyricsDocument(song: Song, trackId: string) {
+    const lyricsHash = await sha256Hex(song.sourceLyricsText);
+    const existingDocument = await supabase
+      .from("lyrics_documents")
+      .select("id")
+      .eq("lyrics_hash", lyricsHash)
+      .eq("tokenizer_version", LYRICS_TOKENIZER_VERSION)
+      .maybeSingle();
+
+    if (existingDocument.error) {
+      throw existingDocument.error;
+    }
+
+    if (existingDocument.data?.id) {
+      return existingDocument.data.id;
+    }
+
+    const documentRow: TablesInsert<"lyrics_documents"> = {
+      track_id: trackId,
+      provider: song.spotifyTrackId ? "spotify" : "manual",
+      lyrics_text: song.sourceLyricsText,
+      lyrics_hash: lyricsHash,
+      tokenizer_version: LYRICS_TOKENIZER_VERSION,
+      line_word_counts: lineWordCountsFromText(song.sourceLyricsText)
+    };
+    const insertedDocument = await supabase.from("lyrics_documents").insert(documentRow).select("id").single();
+
+    if (!insertedDocument.error && insertedDocument.data?.id) {
+      return insertedDocument.data.id;
+    }
+
+    const retryDocument = await supabase
+      .from("lyrics_documents")
+      .select("id")
+      .eq("lyrics_hash", lyricsHash)
+      .eq("tokenizer_version", LYRICS_TOKENIZER_VERSION)
+      .maybeSingle();
+    if (!retryDocument.error && retryDocument.data?.id) {
+      return retryDocument.data.id;
+    }
+
+    throw insertedDocument.error ?? new Error("Lyrics document insert failed.");
+  }
+
+  async function persistSong(song: Song) {
+    const trackId = await findOrCreateTrack(song);
+    const lyricsDocumentId = await findOrCreateLyricsDocument(song, trackId);
+    const songRow: TablesInsert<"user_songs"> = {
       id: song.id,
       user_id: userId,
+      track_id: trackId,
+      lyrics_document_id: lyricsDocumentId,
       title: song.title,
       artist: song.artist ?? null,
       album_name: song.albumName ?? null,
       album_art_url: song.albumArtUrl ?? null,
       spotify_track_id: song.spotifyTrackId ?? null,
       spotify_url: song.spotifyUrl ?? null,
-      duration_ms: song.durationMs ?? null,
-      source_lyrics_text: song.sourceLyricsText
+      duration_ms: song.durationMs ?? null
     };
 
-    const keepLineIds = song.lyrics.map((line) => line.id);
-    const keepWordIds = song.lyrics.flatMap((line) => line.words.map((word) => word.id));
-    const lineRows: TablesInsert<"lyric_lines">[] = song.lyrics.map((line, position) => ({
-      id: line.id,
-      song_id: song.id,
-      user_id: userId,
-      position,
-      text: line.text
-    }));
-    const wordRows: TablesInsert<"lyric_words">[] = song.lyrics.flatMap((line) =>
-      line.words.map((word, position) => ({
-        id: word.id,
-        line_id: line.id,
-        song_id: song.id,
-        user_id: userId,
-        position,
-        text: word.text
-      }))
-    );
-
-    const { error: songError } = await supabase.from("songs").upsert(songRow);
-    if (songError) {
-      throw songError;
+    const { error } = await supabase.from("user_songs").upsert(songRow, { onConflict: "id" });
+    if (error) {
+      throw error;
     }
 
-    if (existingSong) {
-      if (keepWordIds.length > 0) {
-        const { error } = await supabase.from("lyric_words").delete().eq("song_id", song.id).not("id", "in", `(${keepWordIds.join(",")})`);
-        if (error) {
-          throw error;
-        }
-      } else {
-        const { error } = await supabase.from("lyric_words").delete().eq("song_id", song.id);
-        if (error) {
-          throw error;
-        }
-      }
-
-      if (keepLineIds.length > 0) {
-        const { error } = await supabase.from("lyric_lines").delete().eq("song_id", song.id).not("id", "in", `(${keepLineIds.join(",")})`);
-        if (error) {
-          throw error;
-        }
-      } else {
-        const { error } = await supabase.from("lyric_lines").delete().eq("song_id", song.id);
-        if (error) {
-          throw error;
-        }
-      }
-    }
-
-    if (lineRows.length > 0) {
-      const { error } = await supabase.from("lyric_lines").upsert(lineRows);
-      if (error) {
-        throw error;
-      }
-    }
-
-    if (wordRows.length > 0) {
-      const { error } = await supabase.from("lyric_words").upsert(wordRows);
-      if (error) {
-        throw error;
-      }
-    }
+    return { trackId, lyricsDocumentId };
   }
 
   async function saveDraft() {
@@ -1644,9 +1814,13 @@ export function VocalMapApp({
 
     setIsSaving(true);
     try {
-      await persistSong(song, existingSong);
+      const persistedSong = await persistSong(song);
       await deleteStoragePaths(collectRemovedAudioPaths(existingSong, song));
-      let nextSong = song;
+      let nextSong = {
+        ...song,
+        trackId: persistedSong.trackId,
+        lyricsDocumentId: persistedSong.lyricsDocumentId
+      };
       let audioUploadFailed = false;
 
       if (pendingSongAudioFile) {
@@ -1655,8 +1829,8 @@ export function VocalMapApp({
           setSelectedSongAudioId(audioReference.id);
           setPreferredAudioProvider("file");
           nextSong = {
-            ...song,
-            songAudios: [...song.songAudios, audioReference],
+            ...nextSong,
+            songAudios: [...nextSong.songAudios, audioReference],
             updatedAt: new Date().toISOString()
           };
         } catch {
@@ -1690,7 +1864,7 @@ export function VocalMapApp({
       return;
     }
 
-    const { error } = await supabase.from("songs").delete().eq("id", song.id).eq("user_id", userId);
+    const { error } = await supabase.from("user_songs").delete().eq("id", song.id).eq("user_id", userId);
     if (error) {
       setStatusMessage(t("deleteFailed"));
       return;
@@ -1738,52 +1912,90 @@ export function VocalMapApp({
     }
 
     if (existingMarker) {
-      const { error } = await supabase
+      let persistedMarkerPayload = markerPayload;
+      let { error } = await supabase
         .from("markers")
         .update({
-          label: markerPayload.label,
-          meaning: markerPayload.meaning,
-          color: markerPayload.color,
-          icon: markerPayload.icon
+          label: persistedMarkerPayload.label,
+          meaning: persistedMarkerPayload.meaning,
+          color: persistedMarkerPayload.color,
+          icon: persistedMarkerPayload.icon
         })
         .eq("id", existingMarker.id)
         .eq("user_id", userId);
+
+      if (shouldRetryMarkerIcon(error, markerPayload.icon)) {
+        persistedMarkerPayload = { ...markerPayload, icon: FALLBACK_MARKER_ICON };
+        const retryResult = await supabase
+          .from("markers")
+          .update({
+            label: persistedMarkerPayload.label,
+            meaning: persistedMarkerPayload.meaning,
+            color: persistedMarkerPayload.color,
+            icon: persistedMarkerPayload.icon
+          })
+          .eq("id", existingMarker.id)
+          .eq("user_id", userId);
+        error = retryResult.error;
+      }
 
       if (error) {
         setStatusMessage(t("saveFailed"));
         return;
       }
 
-      setMarkers((currentMarkers) => currentMarkers.map((marker) => (marker.id === existingMarker.id ? { ...marker, ...markerPayload } : marker)));
+      setMarkers((currentMarkers) => currentMarkers.map((marker) => (marker.id === existingMarker.id ? { ...marker, ...persistedMarkerPayload } : marker)));
       setSelectedMarkerId(existingMarker.id);
       closeMarkerForm();
       setStatusMessage(t("markerUpdated"));
       return;
     }
 
-    const marker: Marker = {
-      id: `custom-${createId()}`,
-      ...markerPayload,
-      isSystem: false
-    };
-
-    const { error } = await supabase.from("markers").insert({
-      id: marker.id,
+    const markerId = createId();
+    let persistedMarkerPayload = markerPayload;
+    let { error } = await supabase.from("markers").insert({
+      id: markerId,
       user_id: userId,
-      label: marker.label,
-      meaning: marker.meaning,
-      color: marker.color,
-      icon: marker.icon,
+      label: persistedMarkerPayload.label,
+      meaning: persistedMarkerPayload.meaning,
+      color: persistedMarkerPayload.color,
+      icon: persistedMarkerPayload.icon,
       is_system: false,
       sort_order: markers.length + 1
     });
+
+    if (shouldRetryMarkerIcon(error, markerPayload.icon)) {
+      persistedMarkerPayload = { ...markerPayload, icon: FALLBACK_MARKER_ICON };
+      const retryResult = await supabase.from("markers").insert({
+        id: markerId,
+        user_id: userId,
+        label: persistedMarkerPayload.label,
+        meaning: persistedMarkerPayload.meaning,
+        color: persistedMarkerPayload.color,
+        icon: persistedMarkerPayload.icon,
+        is_system: false,
+        sort_order: markers.length + 1
+      });
+      error = retryResult.error;
+    }
 
     if (error) {
       setStatusMessage(t("saveFailed"));
       return;
     }
 
+    const marker: Marker = {
+      id: markerId,
+      ...persistedMarkerPayload,
+      isSystem: false
+    };
+
     setMarkers((currentMarkers) => [...currentMarkers, marker]);
+    setMarkerOrderIds((currentOrderIds) => {
+      const nextOrderIds = [...currentOrderIds.filter((id) => id !== marker.id), marker.id];
+      persistMarkerPreferences(hiddenSystemMarkerIds, systemMarkerOverrides, nextOrderIds);
+      return nextOrderIds;
+    });
     setSelectedMarkerId(marker.id);
     closeMarkerForm();
     setStatusMessage(t("markerAdded"));
@@ -1804,7 +2016,7 @@ export function VocalMapApp({
       const nextHiddenIds = new Set(hiddenSystemMarkerIds);
       nextHiddenIds.add(marker.id);
       setHiddenSystemMarkerIds(nextHiddenIds);
-      persistMarkerPreferences(nextHiddenIds, systemMarkerOverrides);
+      persistMarkerPreferences(nextHiddenIds, systemMarkerOverrides, markerOrderIds);
 
       if (editingMarkerId === marker.id) {
         closeMarkerForm();
@@ -1822,6 +2034,11 @@ export function VocalMapApp({
     }
 
     setMarkers((currentMarkers) => currentMarkers.filter((item) => item.id !== markerId));
+    setMarkerOrderIds((currentOrderIds) => {
+      const nextOrderIds = currentOrderIds.filter((id) => id !== markerId);
+      persistMarkerPreferences(hiddenSystemMarkerIds, systemMarkerOverrides, nextOrderIds);
+      return nextOrderIds;
+    });
     setSelectedMarkerId(null);
     setSongs((currentSongs) =>
       currentSongs.map((song) => ({
@@ -1847,6 +2064,14 @@ export function VocalMapApp({
     setHiddenSystemMarkerIds(nextHiddenIds);
     setSystemMarkerOverrides(nextOverrides);
     localStorage.removeItem(markerPreferencesKey(userId));
+    setMarkerOrderIds((currentOrderIds) => {
+      const currentMarkerIds = new Set(markers.map((marker) => marker.id));
+      const resetOrderIds = [
+        ...translatedInitialMarkers.map((marker) => marker.id).filter((id) => currentMarkerIds.has(id)),
+        ...currentOrderIds.filter((id) => currentMarkerIds.has(id) && !translatedInitialMarkers.some((marker) => marker.id === id))
+      ];
+      return resetOrderIds;
+    });
     setSelectedMarkerId(null);
     setMarkers((currentMarkers) =>
       currentMarkers.map((marker) => {
@@ -2171,6 +2396,8 @@ export function VocalMapApp({
     updater: (payload: {
       lineId: string;
       wordId: string;
+      lineIndex: number;
+      wordIndex: number;
       annotations: WordAnnotation[];
       textNote?: TextNote;
     }) => {
@@ -2187,8 +2414,8 @@ export function VocalMapApp({
           return song;
         }
 
-        const selectedWordIdsForSong = new Set(selectedWordAddresses(song, target).map((address) => address.word.id));
-        if (selectedWordIdsForSong.size === 0) {
+        const selectedWordAddressById = new Map(selectedWordAddresses(song, target).map((address) => [address.word.id, address]));
+        if (selectedWordAddressById.size === 0) {
           return song;
         }
 
@@ -2197,13 +2424,16 @@ export function VocalMapApp({
           lyrics: song.lyrics.map((line) => ({
             ...line,
             words: line.words.map((word) => {
-              if (!selectedWordIdsForSong.has(word.id)) {
+              const selectedAddress = selectedWordAddressById.get(word.id);
+              if (!selectedAddress) {
                 return word;
               }
 
               const result = updater({
                 lineId: line.id,
                 wordId: word.id,
+                lineIndex: selectedAddress.lineIndex,
+                wordIndex: selectedAddress.wordIndex,
                 annotations: word.annotations,
                 textNote: word.textNote
               });
@@ -2330,16 +2560,16 @@ export function VocalMapApp({
         return {
           id: note.id,
           user_id: userId,
-          song_id: selection.songId,
-          line_id: target.lineId,
-          word_id: target.wordId,
+          user_song_id: selection.songId,
+          line_index: target.lineIndex,
+          word_index: target.wordIndex,
           target_type: "word",
           text
         };
       });
 
       const { error } = await supabase.from("target_notes").upsert(rows, {
-        onConflict: "user_id,target_type,song_id,line_id,word_id"
+        onConflict: "user_id,target_type,user_song_id,line_index,word_index"
       });
       if (error) {
         if (!isMissingTargetNotesError(error)) {
@@ -2387,6 +2617,16 @@ export function VocalMapApp({
       return;
     }
 
+    if (!activeSong) {
+      return;
+    }
+
+    const targetCoordinates = getTargetCoordinates(activeSong, selection);
+    if (!targetCoordinates) {
+      setStatusMessage(t("noteSaveFailed"));
+      return;
+    }
+
     const textNote: TextNote = {
       id: selectedData.textNote?.id ?? createId(),
       text,
@@ -2396,15 +2636,15 @@ export function VocalMapApp({
     const row: TablesInsert<"target_notes"> = {
       id: textNote.id,
       user_id: userId,
-      song_id: selection.songId,
-      line_id: selection.lineId,
-      word_id: selection.type === "word" ? selection.wordId : null,
+      user_song_id: targetCoordinates.userSongId,
+      line_index: targetCoordinates.lineIndex,
+      word_index: targetCoordinates.wordIndex,
       target_type: selection.type,
       text
     };
 
     const { error } = await supabase.from("target_notes").upsert(row, {
-      onConflict: "user_id,target_type,song_id,line_id,word_id"
+      onConflict: "user_id,target_type,user_song_id,line_index,word_index"
     });
     if (error) {
       if (!isMissingTargetNotesError(error)) {
@@ -2476,9 +2716,9 @@ export function VocalMapApp({
         return {
           id: annotationId,
           user_id: userId,
-          song_id: selection.songId,
-          line_id: target.lineId,
-          word_id: target.wordId,
+          user_song_id: selection.songId,
+          line_index: target.lineIndex,
+          word_index: target.wordIndex,
           target_type: "word",
           marker_id: markerId
         };
@@ -2517,12 +2757,18 @@ export function VocalMapApp({
     }
 
     const annotationId = createId();
+    const targetCoordinates = getTargetCoordinates(activeSong, selection);
+    if (!targetCoordinates) {
+      setStatusMessage(t("saveFailed"));
+      return;
+    }
+
     const annotationRow: TablesInsert<"annotations"> = {
       id: annotationId,
       user_id: userId,
-      song_id: selection.songId,
-      line_id: selection.lineId,
-      word_id: selection.type === "word" ? selection.wordId ?? null : null,
+      user_song_id: targetCoordinates.userSongId,
+      line_index: targetCoordinates.lineIndex,
+      word_index: targetCoordinates.wordIndex,
       target_type: selection.type,
       marker_id: markerId
     };
@@ -2540,7 +2786,18 @@ export function VocalMapApp({
   async function persistAudioReference(target: SelectedTarget | { songId: string; type: "song" }, blob: Blob) {
     const audioId = createId();
     const mimeType = blob.type || "audio/webm";
-    const targetId = target.type === "song" ? target.songId : target.type === "line" ? target.lineId : target.wordId;
+    const targetSong = songs.find((song) => song.id === target.songId);
+    const targetCoordinates = target.type === "song" || !targetSong ? null : getTargetCoordinates(targetSong, target);
+    if (target.type !== "song" && !targetCoordinates) {
+      throw new Error("Missing target coordinates.");
+    }
+
+    const targetId =
+      target.type === "song"
+        ? target.songId
+        : targetCoordinates?.wordIndex === null
+          ? `line-${targetCoordinates.lineIndex}`
+          : `word-${targetCoordinates?.lineIndex}-${targetCoordinates?.wordIndex}`;
     const storagePath = `${userId}/${target.songId}/${target.type}-${targetId}/${audioId}.${extensionFromMime(mimeType)}`;
     const { error: uploadError } = await supabase.storage.from(AUDIO_BUCKET).upload(storagePath, blob, {
       contentType: mimeType,
@@ -2565,9 +2822,9 @@ export function VocalMapApp({
     const row: TablesInsert<"audio_references"> = {
       id: audioReference.id,
       user_id: userId,
-      song_id: target.songId,
-      line_id: target.type === "line" || target.type === "word" ? target.lineId : null,
-      word_id: target.type === "word" ? target.wordId ?? null : null,
+      user_song_id: target.songId,
+      line_index: targetCoordinates?.lineIndex ?? null,
+      word_index: targetCoordinates?.wordIndex ?? null,
       target_type: target.type,
       storage_path: audioReference.storagePath,
       mime_type: audioReference.mimeType,
@@ -2823,7 +3080,6 @@ export function VocalMapApp({
           <SongMenuCard
             song={activeSong}
             onUpload={(song, file) => void uploadSongAudio(song, file)}
-            onRemove={(song, audioReference) => void removeSongAudio(song, audioReference)}
             onEdit={(song) => {
               setOpenSongOptionsId(null);
               openSongEditor(song);
@@ -2842,8 +3098,7 @@ export function VocalMapApp({
               spotify: common("spotify"),
               addFile: t("addAudioFile"),
               edit: common("edit"),
-              delete: common("delete"),
-              deleteAudio: t("deleteSongAudio")
+              delete: common("delete")
             }}
           />
         ) : null}
@@ -3245,6 +3500,7 @@ export function VocalMapApp({
           sidebarCollapsed={isSidebarCollapsed}
           onProviderChange={setPreferredAudioProvider}
           onSelectedAudioChange={setSelectedSongAudioId}
+          onRemove={(song, audioReference) => void removeSongAudio(song, audioReference)}
           supabase={supabase}
           labels={{
             nowPlaying: t("audioDockNowPlaying"),
@@ -3252,6 +3508,7 @@ export function VocalMapApp({
             file: t("audioDockFile"),
             fileSelect: t("audioDockFileSelect"),
             noFile: t("audioDockNoFile"),
+            deleteAudio: t("deleteSongAudio"),
             spotifyTitle: t("spotifyPlayerTitle", { title: activeSong.title })
           }}
         />
@@ -3379,6 +3636,14 @@ export function VocalMapApp({
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
+                        <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="button" onClick={() => moveMarker(selectedMarker.id, -1)} disabled={selectedMarkerIndex <= 0}>
+                          <ArrowUp size={13} />
+                          {t("markerMoveUp")}
+                        </button>
+                        <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="button" onClick={() => moveMarker(selectedMarker.id, 1)} disabled={selectedMarkerIndex < 0 || selectedMarkerIndex >= visibleMarkers.length - 1}>
+                          <ArrowDown size={13} />
+                          {t("markerMoveDown")}
+                        </button>
                         <button className={`${secondaryButtonClass} min-h-9 px-3 py-1.5 text-xs`} type="button" onClick={() => openMarkerEdit(selectedMarker)}>
                           <Pencil size={13} />
                           {common("edit")}
@@ -3797,7 +4062,7 @@ export function VocalMapApp({
 
       {statusMessage ? (
         <button
-          className="fixed bottom-5 right-5 z-30 max-w-[min(26rem,calc(100vw-2.5rem))] rounded-lg border border-stone-200 bg-white px-4 py-3 text-left text-sm leading-6 text-stone-700 shadow-xl"
+          className="fixed bottom-5 right-5 z-50 max-w-[min(26rem,calc(100vw-2.5rem))] rounded-lg border border-stone-200 bg-white px-4 py-3 text-left text-sm leading-6 text-stone-700 shadow-xl"
           type="button"
           onClick={() => setStatusMessage("")}
           role="status"

@@ -115,6 +115,8 @@
     "markerEditTitle": "Edit marker",
     "markerUpdate": "Update",
     "markerHide": "Hide",
+    "markerMoveUp": "Move up",
+    "markerMoveDown": "Move down",
     "markerResetDefaults": "Reset default markers",
     "markerNameRequired": "Add a short marker label.",
     "markerAdded": "Marker added.",

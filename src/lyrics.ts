@@ -1,14 +1,28 @@
 import type { LyricLine, LyricsMatch } from "./types";
 
+export const LYRICS_TOKENIZER_VERSION = "whitespace-v1";
+
 function makeId() {
   return crypto.randomUUID();
 }
 
-function splitWords(line: string) {
+export function makeLyricLineId(songId: string, lineIndex: number) {
+  return `${songId}:line:${lineIndex}`;
+}
+
+export function makeLyricWordId(songId: string, lineIndex: number, wordIndex: number) {
+  return `${songId}:word:${lineIndex}:${wordIndex}`;
+}
+
+export function splitWords(line: string) {
   return line.match(/\S+/g) ?? [];
 }
 
-export function buildLyrics(text: string, existingLines: LyricLine[] = []) {
+export function lineWordCountsFromText(text: string) {
+  return text.split(/\r?\n/).map((lineText) => splitWords(lineText).length);
+}
+
+export function buildLyrics(text: string, existingLines: LyricLine[] = [], songId?: string) {
   return text.split(/\r?\n/).map((lineText, lineIndex) => {
     const previousLine = existingLines[lineIndex];
     const previousLineMatches = previousLine?.text === lineText;
@@ -17,19 +31,21 @@ export function buildLyrics(text: string, existingLines: LyricLine[] = []) {
       const previousWordMatches = previousLineMatches && previousWord?.text === wordText;
 
       return {
-        id: previousWordMatches ? previousWord.id : makeId(),
+        id: songId ? makeLyricWordId(songId, lineIndex, wordIndex) : previousWordMatches ? previousWord.id : makeId(),
         text: wordText,
         annotations: previousWordMatches ? previousWord.annotations : [],
-        audioReference: previousWordMatches ? previousWord.audioReference : undefined
+        audioReference: previousWordMatches ? previousWord.audioReference : undefined,
+        textNote: previousWordMatches ? previousWord.textNote : undefined
       };
     });
 
     return {
-      id: previousLineMatches ? previousLine.id : makeId(),
+      id: songId ? makeLyricLineId(songId, lineIndex) : previousLineMatches ? previousLine.id : makeId(),
       text: lineText,
       words,
       annotations: previousLineMatches ? previousLine.annotations : [],
-      audioReference: previousLineMatches ? previousLine.audioReference : undefined
+      audioReference: previousLineMatches ? previousLine.audioReference : undefined,
+      textNote: previousLineMatches ? previousLine.textNote : undefined
     };
   });
 }

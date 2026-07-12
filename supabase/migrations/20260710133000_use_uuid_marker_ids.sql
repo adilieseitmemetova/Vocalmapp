@@ -16,43 +16,85 @@ drop index if exists public.annotations_marker_idx;
 
 alter table public.markers add column id_uuid uuid;
 
-with system_marker_ids (code, id) as (
-  values
-    ('up', '34f85819-dcd5-4b7f-9b87-cbee1db85a25'::uuid),
-    ('down', '82004da2-f63f-48e7-9b82-63c2a91c301e'::uuid),
-    ('vib', '303b12be-046c-4a45-ac77-cf9f60b547b0'::uuid),
-    ('hold', '284ca9bc-c5a5-4db3-8cb6-edf24503ec3a'::uuid),
-    ('breath', '2072f47a-2598-4ba9-8a1e-67dea4335a43'::uuid),
-    ('accent', '2ccfea58-2b63-44c1-a040-40732059f846'::uuid),
-    ('soft', 'ce75d279-28ff-4a4f-be74-44c66b3857a5'::uuid),
-    ('strong', 'cc9803f3-931b-4529-893b-be366da4acbc'::uuid),
-    ('slide-up', '1966ec87-3456-4e0e-afbe-482080a6f1bf'::uuid),
-    ('slide-down', '6b282870-226c-4b9e-8f3d-6bb7a1b6ee98'::uuid),
-    ('legato', '127094a9-16ad-4f42-b028-78d0a9f3800c'::uuid),
-    ('pause', 'de929752-6e49-4e8e-8161-88ff6d3a5ce5'::uuid),
-    ('cut', '857c0b2b-2b65-43cf-af5e-0225f1d140b7'::uuid),
-    ('run', '4cb865a7-978c-40d3-832e-2def53d5e162'::uuid),
-    ('mix', 'a31c20a8-a098-4663-8f86-10a4e0fefc19'::uuid),
-    ('head', '419e0b18-7050-47cb-b71d-89bc89c1c295'::uuid),
-    ('chest', '4132a919-5641-414f-807a-b2f2c946d828'::uuid),
-    ('falsetto', 'fedc613b-7f55-4a6e-b695-a359e7c8e838'::uuid),
-    ('twang', '76358f71-404f-46b8-835d-2c15f68ce660'::uuid),
-    ('cry', '8e1a09fe-fd69-4d48-b4ba-e3eac08cea01'::uuid),
-    ('mute', 'cf2ae020-9b52-44f7-8f9d-fc91ff2e3654'::uuid)
-)
+create temporary table marker_system_ids (
+  code text primary key,
+  id uuid not null unique
+) on commit drop;
+
+insert into marker_system_ids (code, id)
+values
+  ('up', '34f85819-dcd5-4b7f-9b87-cbee1db85a25'::uuid),
+  ('down', '82004da2-f63f-48e7-9b82-63c2a91c301e'::uuid),
+  ('vib', '303b12be-046c-4a45-ac77-cf9f60b547b0'::uuid),
+  ('hold', '284ca9bc-c5a5-4db3-8cb6-edf24503ec3a'::uuid),
+  ('breath', '2072f47a-2598-4ba9-8a1e-67dea4335a43'::uuid),
+  ('accent', '2ccfea58-2b63-44c1-a040-40732059f846'::uuid),
+  ('soft', 'ce75d279-28ff-4a4f-be74-44c66b3857a5'::uuid),
+  ('strong', 'cc9803f3-931b-4529-893b-be366da4acbc'::uuid),
+  ('slide-up', '1966ec87-3456-4e0e-afbe-482080a6f1bf'::uuid),
+  ('slide-down', '6b282870-226c-4b9e-8f3d-6bb7a1b6ee98'::uuid),
+  ('legato', '127094a9-16ad-4f42-b028-78d0a9f3800c'::uuid),
+  ('pause', 'de929752-6e49-4e8e-8161-88ff6d3a5ce5'::uuid),
+  ('cut', '857c0b2b-2b65-43cf-af5e-0225f1d140b7'::uuid),
+  ('run', '4cb865a7-978c-40d3-832e-2def53d5e162'::uuid),
+  ('mix', 'a31c20a8-a098-4663-8f86-10a4e0fefc19'::uuid),
+  ('head', '419e0b18-7050-47cb-b71d-89bc89c1c295'::uuid),
+  ('chest', '4132a919-5641-414f-807a-b2f2c946d828'::uuid),
+  ('falsetto', 'fedc613b-7f55-4a6e-b695-a359e7c8e838'::uuid),
+  ('twang', '76358f71-404f-46b8-835d-2c15f68ce660'::uuid),
+  ('cry', '8e1a09fe-fd69-4d48-b4ba-e3eac08cea01'::uuid),
+  ('mute', 'cf2ae020-9b52-44f7-8f9d-fc91ff2e3654'::uuid);
+
 update public.markers marker
-set id_uuid = system_marker_ids.id
-from system_marker_ids
+set id_uuid = marker_system_ids.id
+from marker_system_ids
 where marker.id_uuid is null
   and marker.is_system
-  and coalesce(marker.code, marker.id) = system_marker_ids.code;
+  and coalesce(marker.code, marker.id) = marker_system_ids.code;
+
+with uuid_marker_candidates as (
+  select
+    marker.id,
+    marker.id::uuid as id_uuid,
+    row_number() over (
+      partition by marker.id::uuid
+      order by marker.created_at, marker.id
+    ) as candidate_rank
+  from public.markers marker
+  where marker.id_uuid is null
+    and marker.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+)
+update public.markers marker
+set id_uuid = uuid_marker_candidates.id_uuid
+from uuid_marker_candidates
+where marker.id = uuid_marker_candidates.id
+  and uuid_marker_candidates.candidate_rank = 1
+  and not exists (
+    select 1
+    from marker_system_ids
+    where marker_system_ids.id = uuid_marker_candidates.id_uuid
+  );
 
 update public.markers
-set id_uuid = case
-  when id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then id::uuid
-  else gen_random_uuid()
-end
+set id_uuid = gen_random_uuid()
 where id_uuid is null;
+
+do $$
+declare
+  duplicate_marker_id uuid;
+begin
+  select id_uuid
+  into duplicate_marker_id
+  from public.markers
+  group by id_uuid
+  having count(*) > 1
+  limit 1;
+
+  if duplicate_marker_id is not null then
+    raise exception 'Cannot migrate markers.id because duplicate UUID % was assigned.', duplicate_marker_id;
+  end if;
+end
+$$;
 
 alter table public.markers alter column id_uuid set not null;
 

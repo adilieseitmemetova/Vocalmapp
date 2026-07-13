@@ -1,0 +1,107 @@
+{
+  "meta": {
+    "title": "Logo exploration for vocalmapp",
+    "stage": "Logo exploration",
+    "brand_name": "vocalmapp",
+    "anchor": "A private workspace where singers map lyrics, vocal markers, and reference audio.",
+    "summary": "Six distinct identity directions for a calm, musical, product-led vocal practice app.",
+    "base_asset": "/Users/adilieseitmemetova/Sites/vocal app/public/images/vocalmap-logo-green.svg"
+  },
+  "constraints": {
+    "preserve": [
+      "exact brand name: vocalmapp",
+      "vocal practice and lyric annotation category",
+      "clear silhouette at app-icon and sidebar sizes",
+      "calm, encouraging, precise product tone"
+    ],
+    "avoid": [
+      "microphones, headphones, musical notes, or karaoke clichés",
+      "fake taglines, partner marks, or trademark symbols",
+      "gradients, 3D mockups, paper textures, and presentation frames",
+      "overly generic audio waveform symbols"
+    ]
+  },
+  "routes": [
+    {
+      "id": "breathline",
+      "label": "Breathline",
+      "family": "symbol",
+      "usage_contexts": ["app icon", "dashboard sidebar", "practice cards"],
+      "prompt": "Create one flat logo concept on a pure white inspection background for the vocal practice app vocalmapp. Show a minimal emerald sound line that feels like one controlled breath, beginning compact then opening into a clean V-like gesture, with a restrained lowercase wordmark beside it. Use a calm #059669 emerald green with near-black supporting type. Contemporary SaaS identity, precise, friendly, generous empty space, horizontal lockup plus a small icon echo. The exact wordmark spelling is directional only. No microphone, headphones, musical notes, karaoke symbols, gradients, 3D, mockup, paper texture, taglines, trademark marks, or extra copy.",
+      "rationale": "Makes vocal control feel human and memorable without leaning on music clichés.",
+      "best_for": "A distinctive app icon and a gentle, practice-oriented brand feel.",
+      "decision_advice": "Choose this if the product should feel personal and musical while remaining uncluttered.",
+      "watch_out": "The line must stay legible when reduced to 16 pixels.",
+      "next_step": "Reduce the symbol to two or three decisive strokes and test its smallest-size silhouette.",
+      "final_owner": "external-production-identity"
+    },
+    {
+      "id": "cue-v",
+      "label": "Cue V",
+      "family": "monogram",
+      "usage_contexts": ["favicon", "mobile launcher", "compact navigation"],
+      "prompt": "Create one flat logo concept on a pure white inspection background for vocalmapp, a private app for annotating song lyrics with vocal cues and audio references. Build a sharp but friendly V monogram from two offset lyric-cursor bars and a small pulse notch, as if a marker has landed on a vocal phrase. Pair it with a compact geometric lowercase wordmark. Use emerald green #059669 and charcoal only. Product-design quality, simple vector-like silhouette, balanced horizontal lockup and a standalone icon. Exact lettering is directional. No musical notes, microphone, headphone, waveform cliché, gradients, 3D, mockup, taglines, fake symbols, or extra text.",
+      "rationale": "Connects the initial to the product's core action: placing a precise cue.",
+      "best_for": "Small touch targets, a navigation rail, and a recognisable product icon.",
+      "decision_advice": "Choose this if compactness and product utility should lead the identity.",
+      "watch_out": "Avoid making the cursor bars look like a generic checkmark.",
+      "next_step": "Explore a one-color icon-only version at 16, 24, and 32 pixels.",
+      "final_owner": "external-production-identity"
+    },
+    {
+      "id": "lyric-grid",
+      "label": "Lyric Grid",
+      "family": "utility",
+      "usage_contexts": ["editor toolbar", "song-library tiles", "documentation"],
+      "prompt": "Create one flat logo concept on a pure white inspection background for the singer workspace vocalmapp. Design an abstract, compact mark of three lyric-line blocks with one highlighted vocal cue moving diagonally through them; it should subtly suggest a V in negative space. Pair it with an editorial, legible lowercase wordmark. Use an emerald green #059669 accent, graphite black, and no more than one pale mint detail. Quiet, structured, modern software identity, refined spacing, standalone app icon beside wordmark. Exact lettering is directional. No literal lyrics, no microphone, notes, headphones, waveform, gradients, mockups, shadows, taglines, trademarks, or extra words.",
+      "rationale": "Directly reflects annotation and lyric mapping, the task that differentiates the app.",
+      "best_for": "A product-first identity that can extend into interface patterns.",
+      "decision_advice": "Choose this if the brand should feel organised, intelligent, and rooted in the editor.",
+      "watch_out": "It must not read as a generic document or spreadsheet icon.",
+      "next_step": "Test whether the highlighted cue can become a recurring motion or selection state in the UI.",
+      "final_owner": "external-production-identity"
+    },
+    {
+      "id": "resonance-ring",
+      "label": "Resonance Ring",
+      "family": "symbol",
+      "usage_contexts": ["profile badge", "social avatar", "loading and audio states"],
+      "prompt": "Create one flat logo concept on a pure white inspection background for vocalmapp, a calm app that helps singers rehearse and remember vocal details. Make a minimal open circular resonance ring with a single measured interruption that forms a subtle lowercase v or breath opening, next to a soft humanist lowercase wordmark. Emerald #059669 primary with deep forest green secondary, crisp vector-like rendering, ample whitespace, icon and horizontal lockup. Exact wordmark spelling is directional. No microphone, music notes, headphones, obvious waveform, gradient, 3D, mockup, texture, taglines, legal marks, or extra copy.",
+      "rationale": "Frames practice as repeatable focus and resonant sound rather than performance spectacle.",
+      "best_for": "A more ownable, iconic mark across social, avatars, and animated states.",
+      "decision_advice": "Choose this if you want a quieter symbol that can grow into a full visual system.",
+      "watch_out": "The circular form needs a unique interruption so it does not feel like an audio player control.",
+      "next_step": "Refine the gap geometry and test a short two-frame pulse animation.",
+      "final_owner": "external-production-identity"
+    },
+    {
+      "id": "voice-path",
+      "label": "Voice Path",
+      "family": "adaptive",
+      "usage_contexts": ["landing-page header", "onboarding", "wide desktop navigation"],
+      "prompt": "Create one flat logo concept on a pure white inspection background for vocalmapp, a private vocal mapping workspace. Draw a single continuous path that travels across a baseline in intentional rises and rests, then resolves as a small V-shaped vocal marker. Pair it with a measured lowercase wordmark with a custom cut in one letter. Use evergreen #059669, soft sage accent, and black; elegant but distinctly digital, vector-style, wide horizontal lockup with an independent app icon. Exact spelling is directional. Do not use a generic waveform, music note, microphone, headphones, gradients, 3D, mockup device, paper, slogans, trademark glyphs, or any extra text.",
+      "rationale": "Bridges lyric progression, musical phrasing, and the user's personal learning path.",
+      "best_for": "A warm, expressive identity that still scales to a functional product shell.",
+      "decision_advice": "Choose this if you want the logo to carry more motion and narrative.",
+      "watch_out": "The path should simplify cleanly for the icon without losing its gesture.",
+      "next_step": "Build responsive versions: full lockup, compact mark, and a single-stroke favicon.",
+      "final_owner": "external-production-identity"
+    },
+    {
+      "id": "quiet-wordmark",
+      "label": "Quiet Wordmark",
+      "family": "wordmark",
+      "usage_contexts": ["login screen", "marketing site", "print and email"],
+      "prompt": "Create one flat typographic logo concept on a pure white inspection background for vocalmapp, a polished private workspace for singers to mark lyrics and reference audio. Focus on a custom lowercase wordmark: warm rounded geometry, slightly narrow rhythm, a subtle vocal-cue notch inside the first v, and a tiny independent dot or cue glyph. Use only deep forest green #065f46 and emerald #059669. Editorial software identity, clean vector-like construction, generous whitespace, show horizontal wordmark and a compact glyph. Exact wordmark lettering is directional. No microphone, notes, headphones, waveform, gradients, 3D, shadows, mockups, taglines, trademark marks, or extra copy.",
+      "rationale": "Lets the product name become the memorable asset while keeping the interface calm and premium.",
+      "best_for": "A durable identity with excellent readability on login, web, and editorial materials.",
+      "decision_advice": "Choose this if vocalmapp should feel like a focused tool rather than a music brand.",
+      "watch_out": "A wordmark-led route needs a carefully designed favicon companion.",
+      "next_step": "Vector-draw the letterforms and derive the cue glyph from the v detail.",
+      "final_owner": "external-production-identity"
+    }
+  ],
+  "handoff": {
+    "default_owner": "external-production-identity"
+  }
+}

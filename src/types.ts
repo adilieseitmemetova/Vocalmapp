@@ -73,6 +73,7 @@ export type Marker = {
 
 export type AudioReference = {
   id: string;
+  label: string;
   storagePath: string;
   mimeType: string;
   durationMs?: number;

@@ -3,6 +3,8 @@
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronUp,
   Ellipsis,
   ExternalLink,
   FileText,
@@ -29,6 +31,7 @@ import {
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 import {
   LYRICS_TOKENIZER_VERSION,
@@ -271,17 +274,22 @@ function makeMarkerStyle(marker: Marker): CSSProperties {
   };
 }
 
-function makeAudioReference(path: string, blob: Blob, id = createId()): AudioReference {
+function makeAudioReference(path: string, blob: Blob, label: string, id = createId()): AudioReference {
   const now = new Date().toISOString();
 
   return {
     id,
+    label,
     storagePath: path,
     mimeType: blob.type || "audio/webm",
     sizeBytes: blob.size,
     createdAt: now,
     updatedAt: now
   };
+}
+
+function labelFromFileName(fileName: string) {
+  return fileName.replace(/\.[^/.]+$/, "").trim();
 }
 
 function countMarkedTargets(song: Song) {
@@ -685,7 +693,7 @@ function MarkerBadge({ markerId, markerById }: { markerId: string; markerById: M
 
   return (
     <span
-      className="inline-flex h-[18px] max-w-24 items-center gap-1 overflow-hidden rounded-full border px-1.5 text-[10px] font-bold leading-none"
+      className="inline-flex h-5 max-w-28 items-center gap-1 overflow-hidden rounded-full border px-1.5 text-[0.625rem] font-bold leading-none"
       style={makeMarkerStyle(marker)}
       title={marker.meaning}
     >
@@ -698,12 +706,12 @@ function MarkerBadge({ markerId, markerById }: { markerId: string; markerById: M
 function AudioDot({ onPlay, title }: { onPlay: () => void; title: string }) {
   return (
     <button
-      className="inline-grid size-[18px] place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
+      className="inline-grid size-7 place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
       type="button"
       title={title}
       onClick={onPlay}
     >
-      <Play size={10} fill="currentColor" />
+      <Play size={12} fill="currentColor" />
     </button>
   );
 }
@@ -711,13 +719,13 @@ function AudioDot({ onPlay, title }: { onPlay: () => void; title: string }) {
 function NoteDot({ note, title }: { note: TextNote; title: string }) {
   return (
     <button
-      className="inline-grid size-[18px] place-items-center rounded-full border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-100"
+      className="inline-grid size-7 place-items-center rounded-full border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-100"
       type="button"
       title={`${title}: ${note.text}`}
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <StickyNote size={10} />
+      <StickyNote size={12} />
     </button>
   );
 }
@@ -792,6 +800,7 @@ function LyricsLine({
   lyricWordsStyle: CSSProperties;
   labels: {
     emptyLine: string;
+    lineCue: string;
     lineAudio: string;
     wordAudio: string;
     note: string;
@@ -803,24 +812,32 @@ function LyricsLine({
   return (
     <div
       data-lyric-selection-surface="true"
-      className={`grid cursor-pointer grid-cols-1 gap-1 rounded-xl border px-3 transition lg:grid-cols-[9.5rem_minmax(0,1fr)] lg:gap-4 ${
-        lineIsSelected || lineHasRangeSelection ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
+      className={`lyrics-line group cursor-pointer ${
+        lineIsSelected || lineHasRangeSelection ? "is-selected" : ""
       }`}
       style={lyricLineStyle}
       onClick={(event) => onLineSelect(line.id, event.currentTarget)}
     >
-      <div className="flex flex-wrap items-start gap-1 pt-0.5 lg:justify-end">
-        {line.annotations.map((annotation) => (
-          <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
-        ))}
-        {line.audioReference ? <AudioDot onPlay={() => onPlayAudio(line.audioReference!)} title={labels.lineAudio} /> : null}
-        {line.textNote ? <NoteDot note={line.textNote} title={labels.note} /> : null}
-      </div>
-      <div className="flex min-w-0 flex-wrap items-start gap-y-1 text-stone-950" style={{ ...lyricTextStyle, ...lyricWordsStyle }}>
-        {line.words.length === 0 ? (
-          <span className="min-h-[1.7em]" aria-hidden="true" />
-        ) : (
-          line.words.map((word, wordIndex) => {
+      <div className="min-w-0">
+        {line.annotations.length > 0 || line.audioReference || line.textNote ? (
+          <div className="line-cue-rail">
+            <span className="line-cue-rule" aria-hidden="true" />
+            <div className="line-cue-content">
+              <span className="line-cue-label">{labels.lineCue}</span>
+              {line.annotations.map((annotation) => (
+                <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
+              ))}
+              {line.audioReference ? <AudioDot onPlay={() => onPlayAudio(line.audioReference!)} title={labels.lineAudio} /> : null}
+              {line.textNote ? <NoteDot note={line.textNote} title={labels.note} /> : null}
+            </div>
+            <span className="line-cue-rule" aria-hidden="true" />
+          </div>
+        ) : null}
+        <div className="flex min-w-0 flex-wrap items-start justify-center gap-y-1 text-[var(--vm-ink)]" style={{ ...lyricTextStyle, ...lyricWordsStyle }}>
+          {line.words.length === 0 ? (
+            <span className="min-h-[1.7em]" aria-hidden="true" />
+          ) : (
+            line.words.map((word, wordIndex) => {
             const wordIsSelected = selectedWordIds.has(word.id);
             const hasNextWord = wordIndex < line.words.length - 1;
             const annotationsToShow = visibleWordAnnotations(line, wordIndex);
@@ -848,7 +865,7 @@ function LyricsLine({
                 </span>
                 <span className="inline-flex items-center">
                   <button
-                    className={`max-w-full touch-none select-none rounded px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-emerald-200 ${
+                    className={`max-w-full touch-pan-y select-none rounded-md px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-emerald-200 ${
                       wordIsSelected ? "bg-emerald-100 ring-2 ring-emerald-200" : "hover:bg-emerald-50 hover:ring-2 hover:ring-emerald-100 focus:bg-emerald-50"
                     }`}
                     type="button"
@@ -878,7 +895,7 @@ function LyricsLine({
                   </button>
                   {hasNextWord ? (
                     <button
-                      className="h-[1.7em] w-3 touch-none select-none rounded transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                      className="h-[1.7em] w-3 touch-pan-y select-none rounded transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-100"
                       type="button"
                       tabIndex={-1}
                       aria-hidden="true"
@@ -896,8 +913,9 @@ function LyricsLine({
                 </span>
               </span>
             );
-          })
-        )}
+            })
+          )}
+        </div>
       </div>
     </div>
   );
@@ -905,7 +923,6 @@ function LyricsLine({
 
 function SongMenuCard({
   song,
-  onUpload,
   onEdit,
   onDelete,
   optionsOpen,
@@ -913,7 +930,6 @@ function SongMenuCard({
   labels
 }: {
   song: Song;
-  onUpload: (song: Song, file: File) => void;
   onEdit: (song: Song) => void;
   onDelete: (song: Song) => void;
   optionsOpen: boolean;
@@ -924,14 +940,15 @@ function SongMenuCard({
     lines: string;
     markers: string;
     spotify: string;
-    addFile: string;
+    workspaceHint: string;
     edit: string;
     delete: string;
+    options: string;
   };
 }) {
   return (
-    <section className="relative grid gap-3 border-t border-stone-200 pt-3 pb-1">
-      <div className="relative aspect-square overflow-hidden rounded-xl border border-stone-200 bg-stone-100">
+    <section className="relative grid grid-cols-[5.25rem_minmax(0,1fr)] gap-3 border-t border-stone-200/80 pt-4 pb-1">
+      <div className="relative aspect-square overflow-hidden rounded-[1.125rem] border border-stone-200 bg-stone-100 shadow-[0_10px_24px_rgba(33,63,53,0.10)]">
         {song.albumArtUrl ? (
           <Image className="size-full object-cover" src={song.albumArtUrl} alt={labels.coverAlt} width={640} height={640} priority loading="eager" />
         ) : (
@@ -941,10 +958,10 @@ function SongMenuCard({
         )}
       </div>
 
-      <div className="relative min-w-0 pr-9" data-song-options-menu="true">
-        <p className="truncate text-[0.6875rem] font-semibold uppercase text-stone-500">{song.artist ?? labels.noArtist}</p>
-        <h2 className="mt-0.5 line-clamp-2 min-w-0 text-sm font-semibold leading-5 text-stone-950">{song.title}</h2>
-        <p className="mt-1 truncate text-xs text-stone-500">
+      <div className="relative min-w-0 self-center pr-9" data-song-options-menu="true">
+        <p className="truncate text-[0.625rem] font-bold uppercase tracking-[0.12em] text-stone-500">{song.artist ?? labels.noArtist}</p>
+        <h2 className="mt-1 line-clamp-2 min-w-0 text-base font-semibold leading-5 tracking-[-0.02em] text-stone-950">{song.title}</h2>
+        <p className="mt-1.5 truncate text-xs text-stone-500">
           {labels.lines} · {labels.markers}
         </p>
         <button
@@ -955,8 +972,8 @@ function SongMenuCard({
           onClick={onToggleOptions}
           aria-expanded={optionsOpen}
           aria-haspopup="menu"
-          aria-label="Song options"
-          title="Song options"
+          aria-label={labels.options}
+          title={labels.options}
         >
           <Ellipsis size={15} />
         </button>
@@ -984,18 +1001,19 @@ function SongMenuCard({
         ) : null}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="col-span-2 grid gap-2">
         {song.spotifyUrl ? (
-          <a className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-stone-950 px-3 text-xs font-semibold text-white transition hover:bg-stone-800" href={song.spotifyUrl} target="_blank" rel="noreferrer">
+          <a
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-stone-950 px-3 text-xs font-semibold text-white transition hover:bg-stone-800"
+            href={song.spotifyUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
             <ExternalLink size={13} />
             {labels.spotify}
           </a>
         ) : null}
-        <label className="relative inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 overflow-hidden rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white transition hover:bg-emerald-700">
-          <Upload size={13} />
-          <span>{labels.addFile}</span>
-          <input className="absolute inset-0 cursor-pointer opacity-0" type="file" accept="audio/*" onChange={(event) => event.target.files?.[0] && onUpload(song, event.target.files[0])} />
-        </label>
+        <p className="text-center text-[0.6875rem] font-medium leading-4 text-stone-400">{labels.workspaceHint}</p>
       </div>
 
     </section>
@@ -1006,9 +1024,9 @@ function AudioProviderDock({
   song,
   provider,
   selectedAudioId,
-  sidebarCollapsed,
   onProviderChange,
   onSelectedAudioChange,
+  onUpload,
   onRemove,
   supabase,
   labels
@@ -1016,9 +1034,9 @@ function AudioProviderDock({
   song: Song;
   provider: AudioProvider;
   selectedAudioId: string | null;
-  sidebarCollapsed: boolean;
   onProviderChange: (provider: AudioProvider) => void;
   onSelectedAudioChange: (audioId: string) => void;
+  onUpload: (song: Song, file: File, label: string) => void;
   onRemove: (song: Song, audioReference: AudioReference) => void;
   supabase: ReturnType<typeof createClient>;
   labels: {
@@ -1028,38 +1046,68 @@ function AudioProviderDock({
     fileSelect: string;
     noFile: string;
     deleteAudio: string;
+    addFile: string;
+    audioNameTitle: string;
+    audioNameLabel: string;
+    audioNamePlaceholder: string;
+    audioNameInstrumental: string;
+    audioNameOriginal: string;
+    audioNameCover: string;
+    audioNameRequired: string;
+    audioUploadDialogBody: string;
+    chooseAudioFile: string;
+    changeAudioFile: string;
+    noAudioFile: string;
+    cancel: string;
+    close: string;
     spotifyTitle: string;
+    expand: string;
+    collapse: string;
   };
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [pendingUpload, setPendingUpload] = useState<File | null>(null);
+  const [pendingUploadLabel, setPendingUploadLabel] = useState("");
   const trackId = getSpotifyTrackEmbedId(song);
   const hasSpotify = Boolean(trackId);
   const hasFiles = song.songAudios.length > 0;
+  const hasActiveProvider = (provider === "spotify" && hasSpotify) || (provider === "file" && hasFiles);
   const activeAudio = song.songAudios.find((audioReference) => audioReference.id === selectedAudioId) ?? song.songAudios[0];
   const fileUrl = useAudioUrl(provider === "file" ? activeAudio : undefined, supabase);
 
-  if (!hasSpotify && !hasFiles) {
-    return null;
-  }
+  useEffect(() => {
+    if (!isUploadDialogOpen) {
+      return;
+    }
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsUploadDialogOpen(false);
+        setPendingUpload(null);
+        setPendingUploadLabel("");
+      }
+    };
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isUploadDialogOpen]);
 
   return (
-    <div
-      className={`fixed inset-x-3 bottom-3 z-30 rounded-2xl border border-stone-200 bg-white p-2 ${
-        sidebarCollapsed ? "md:left-[calc(4.75rem+1.5rem)] md:right-5" : "md:left-[calc(22rem+1.5rem)] md:right-5"
-      }`}
-    >
-      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+    <div className="audio-provider-dock">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          {song.albumArtUrl ? <Image className="size-11 flex-none rounded-lg object-cover" src={song.albumArtUrl} alt={labels.nowPlaying} width={44} height={44} /> : <Music2 className="flex-none text-stone-500" size={22} />}
+          {song.albumArtUrl ? <Image className="size-11 flex-none rounded-[0.8rem] object-cover" src={song.albumArtUrl} alt={labels.nowPlaying} width={44} height={44} /> : <span className="grid size-11 flex-none place-items-center rounded-[0.8rem] bg-stone-100"><Music2 className="text-stone-500" size={20} /></span>}
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-stone-950">{song.title}</p>
-            <p className="truncate text-xs text-stone-500">{song.artist ?? labels.nowPlaying}</p>
+            <p className="truncate text-sm font-semibold tracking-[-0.01em] text-stone-950">{song.title}</p>
+            <p className="truncate text-xs text-stone-500">{provider === "file" && activeAudio ? activeAudio.label : song.artist ?? labels.nowPlaying}</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {hasSpotify ? (
             <button
-              className={`inline-flex h-9 items-center justify-center rounded-full border px-3 text-xs font-semibold transition ${
+              className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-[0.6875rem] font-semibold transition sm:px-3 sm:text-xs ${
                 provider === "spotify" ? "border-stone-950 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
               }`}
               type="button"
@@ -1070,7 +1118,7 @@ function AudioProviderDock({
           ) : null}
           {hasFiles ? (
             <button
-              className={`inline-flex h-9 items-center justify-center rounded-full border px-3 text-xs font-semibold transition ${
+              className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-[0.6875rem] font-semibold transition sm:px-3 sm:text-xs ${
                 provider === "file" ? "border-emerald-600 bg-emerald-600 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
               }`}
               type="button"
@@ -1079,10 +1127,35 @@ function AudioProviderDock({
               {labels.file}
             </button>
           ) : null}
+          <button
+            className="audio-provider-upload"
+            type="button"
+            title={labels.addFile}
+            onClick={() => {
+              setPendingUpload(null);
+              setPendingUploadLabel("");
+              setIsUploadDialogOpen(true);
+            }}
+          >
+            <Upload size={14} />
+            <span>{labels.addFile}</span>
+          </button>
+          {hasActiveProvider ? (
+            <button
+              className="inline-grid size-8 place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-emerald-200 hover:bg-emerald-50 lg:hidden"
+              type="button"
+              onClick={() => setIsExpanded((current) => !current)}
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? labels.collapse : labels.expand}
+              title={isExpanded ? labels.collapse : labels.expand}
+            >
+              {isExpanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+            </button>
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-2">
+      <div className={`audio-provider-body ${hasActiveProvider ? "mt-2" : ""} ${isExpanded ? "is-expanded" : ""}`}>
         {provider === "spotify" && trackId ? (
           <iframe
             className="block h-20 w-full rounded-xl"
@@ -1092,7 +1165,7 @@ function AudioProviderDock({
             loading="lazy"
           />
         ) : null}
-        {provider === "file" ? (
+        {provider === "file" && hasFiles ? (
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
             <div className="flex min-w-0 items-center gap-2">
               {fileUrl ? <audio className="h-10 min-w-0 flex-1" controls src={fileUrl} /> : <p className="min-w-0 flex-1 text-sm text-stone-500">{labels.noFile}</p>}
@@ -1109,9 +1182,9 @@ function AudioProviderDock({
                 onChange={(event) => onSelectedAudioChange(event.target.value)}
                 aria-label={labels.fileSelect}
               >
-                {song.songAudios.map((audioReference, index) => (
+                {song.songAudios.map((audioReference) => (
                   <option key={audioReference.id} value={audioReference.id}>
-                    {labels.file} {index + 1}
+                    {audioReference.label}
                   </option>
                 ))}
               </select>
@@ -1119,6 +1192,127 @@ function AudioProviderDock({
           </div>
         ) : null}
       </div>
+
+      {isUploadDialogOpen && typeof document !== "undefined"
+        ? createPortal(
+        <div
+          className="audio-upload-dialog-backdrop"
+          onMouseDown={() => {
+            setIsUploadDialogOpen(false);
+            setPendingUpload(null);
+            setPendingUploadLabel("");
+          }}
+        >
+          <section
+            className="audio-upload-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`audio-upload-title-${song.id}`}
+            aria-describedby={`audio-upload-description-${song.id}`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="audio-upload-dialog-header">
+              <div>
+                <h2 id={`audio-upload-title-${song.id}`}>{labels.audioNameTitle}</h2>
+                <p id={`audio-upload-description-${song.id}`}>{labels.audioUploadDialogBody}</p>
+              </div>
+              <button
+                className="audio-upload-dialog-close"
+                type="button"
+                onClick={() => {
+                  setIsUploadDialogOpen(false);
+                  setPendingUpload(null);
+                  setPendingUploadLabel("");
+                }}
+                aria-label={labels.close}
+                title={labels.close}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form
+              className="audio-upload-dialog-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const label = pendingUploadLabel.trim();
+                if (!pendingUpload || !label) {
+                  return;
+                }
+                onUpload(song, pendingUpload, label);
+                setIsUploadDialogOpen(false);
+                setPendingUpload(null);
+                setPendingUploadLabel("");
+              }}
+            >
+              <label className="audio-upload-file-picker">
+                <Upload size={17} />
+                <span>{pendingUpload ? labels.changeAudioFile : labels.chooseAudioFile}</span>
+                <input
+                  className="sr-only"
+                  type="file"
+                  accept="audio/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      setPendingUpload(file);
+                    }
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <p className={`audio-upload-selected-file ${pendingUpload ? "is-selected" : ""}`} aria-live="polite">
+                {pendingUpload?.name ?? labels.noAudioFile}
+              </p>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold text-stone-800" htmlFor={`audio-name-${song.id}`}>{labels.audioNameLabel}</label>
+                <input
+                  className="audio-upload-name-input"
+                  id={`audio-name-${song.id}`}
+                  type="text"
+                  value={pendingUploadLabel}
+                  onChange={(event) => setPendingUploadLabel(event.target.value)}
+                  placeholder={labels.audioNamePlaceholder}
+                  autoFocus
+                />
+                <div className="audio-upload-type-options" aria-label={labels.audioNameLabel}>
+                  {[labels.audioNameInstrumental, labels.audioNameOriginal, labels.audioNameCover].map((option) => (
+                    <button
+                      className={pendingUploadLabel === option ? "is-selected" : ""}
+                      type="button"
+                      key={option}
+                      onClick={() => setPendingUploadLabel(option)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {!pendingUploadLabel.trim() ? <p className="audio-upload-name-hint">{labels.audioNameRequired}</p> : null}
+              <div className="audio-upload-dialog-actions">
+                <button
+                  className="audio-upload-cancel"
+                  type="button"
+                  onClick={() => {
+                    setIsUploadDialogOpen(false);
+                    setPendingUpload(null);
+                    setPendingUploadLabel("");
+                  }}
+                >
+                  {labels.cancel}
+                </button>
+                <button className="audio-upload-submit" type="submit" disabled={!pendingUpload || !pendingUploadLabel.trim()}>
+                  {labels.addFile}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>,
+        document.body
+      )
+        : null}
     </div>
   );
 }
@@ -1159,6 +1353,7 @@ export function VocalMapApp({
   const [markerOrderIds, setMarkerOrderIds] = useState<string[]>(() => translatedInitialMarkers.map((marker) => marker.id));
   const [customMarkerDraft, setCustomMarkerDraft] = useState(EMPTY_CUSTOM_MARKER);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileLibraryOpen, setIsMobileLibraryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeSettingsPanel, setActiveSettingsPanel] = useState<SettingsPanel>("markers");
   const [isMarkerFormOpen, setIsMarkerFormOpen] = useState(false);
@@ -1221,6 +1416,7 @@ export function VocalMapApp({
         setOpenSongOptionsId(null);
         setSelection(null);
         setIsSettingsOpen(false);
+        setIsMobileLibraryOpen(false);
       }
     }
 
@@ -1253,16 +1449,6 @@ export function VocalMapApp({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, []);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      if (window.matchMedia("(max-width: 767px)").matches) {
-        setIsSidebarCollapsed(true);
-      }
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
   }, []);
 
   useEffect(() => {
@@ -1389,7 +1575,7 @@ export function VocalMapApp({
   const activeSong = useMemo(() => songs.find((song) => song.id === effectiveActiveSongId), [effectiveActiveSongId, songs]);
   const activeSongHasSpotify = Boolean(activeSong && getSpotifyTrackEmbedId(activeSong));
   const activeSongHasFiles = Boolean(activeSong && activeSong.songAudios.length > 0);
-  const activeAudioProvider: AudioProvider | null =
+  const activeAudioProvider: AudioProvider =
     preferredAudioProvider === "file" && activeSongHasFiles
       ? "file"
       : preferredAudioProvider === "spotify" && activeSongHasSpotify
@@ -1398,7 +1584,7 @@ export function VocalMapApp({
           ? "file"
           : activeSongHasSpotify
             ? "spotify"
-            : null;
+            : "file";
   const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
   const orderedMarkers = useMemo(() => applyMarkerOrder(markers, markerOrderIds), [markerOrderIds, markers]);
   const visibleMarkers = useMemo(() => orderedMarkers.filter((marker) => !marker.isSystem || !hiddenSystemMarkerIds.has(marker.id)), [hiddenSystemMarkerIds, orderedMarkers]);
@@ -1766,7 +1952,11 @@ export function VocalMapApp({
 
       if (pendingSongAudioFile) {
         try {
-          const audioReference = await persistAudioReference({ songId: song.id, type: "song" }, pendingSongAudioFile);
+          const audioReference = await persistAudioReference(
+            { songId: song.id, type: "song" },
+            pendingSongAudioFile,
+            labelFromFileName(pendingSongAudioFile.name) || t("audioNameFallback")
+          );
           setSelectedSongAudioId(audioReference.id);
           setPreferredAudioProvider("file");
           nextSong = {
@@ -2681,7 +2871,11 @@ export function VocalMapApp({
     }));
   }
 
-  async function persistAudioReference(target: SelectedTarget | { songId: string; type: "song" }, blob: Blob) {
+  async function persistAudioReference(target: SelectedTarget | { songId: string; type: "song" }, blob: Blob, label: string) {
+    const normalizedLabel = label.trim();
+    if (!normalizedLabel) {
+      throw new Error("Audio label is required.");
+    }
     const audioId = createId();
     const mimeType = blob.type || "audio/webm";
     const targetSong = songs.find((song) => song.id === target.songId);
@@ -2706,7 +2900,7 @@ export function VocalMapApp({
       throw uploadError;
     }
 
-    const audioReference = makeAudioReference(storagePath, blob, audioId);
+    const audioReference = makeAudioReference(storagePath, blob, normalizedLabel, audioId);
     const existingSelectedData = target.type === "song" ? null : findSelectedData(songs.find((song) => song.id === target.songId), target, common("emptyLine"));
     const existingAudio = target.type === "song" ? undefined : existingSelectedData?.type === "range" ? undefined : existingSelectedData?.audioReference;
 
@@ -2724,6 +2918,7 @@ export function VocalMapApp({
       line_index: targetCoordinates?.lineIndex ?? null,
       word_index: targetCoordinates?.wordIndex ?? null,
       target_type: target.type,
+      label: audioReference.label,
       storage_path: audioReference.storagePath,
       mime_type: audioReference.mimeType,
       size_bytes: audioReference.sizeBytes ?? null
@@ -2797,7 +2992,7 @@ export function VocalMapApp({
         }
 
         try {
-          const audioReference = await persistAudioReference(recordedTarget, blob);
+          const audioReference = await persistAudioReference(recordedTarget, blob, t("recordingAudioName"));
           updateSelectedTarget(recordedTarget, () => ({ audioReference }));
           setStatusMessage(t("audioSaved"));
         } catch {
@@ -2834,9 +3029,9 @@ export function VocalMapApp({
     await audio.play();
   }
 
-  async function uploadSongAudio(song: Song, file: File) {
+  async function uploadSongAudio(song: Song, file: File, label: string) {
     try {
-      const audioReference = await persistAudioReference({ songId: song.id, type: "song" }, file);
+      const audioReference = await persistAudioReference({ songId: song.id, type: "song" }, file, label);
       setSongs((currentSongs) =>
         currentSongs.map((item) => (item.id === song.id ? { ...item, songAudios: [...item.songAudios, audioReference], updatedAt: new Date().toISOString() } : item))
       );
@@ -2866,8 +3061,8 @@ export function VocalMapApp({
 
   const popoverStyle = selection
     ? ({
-        left: `min(${selection.x + 12}px, calc(100vw - 388px))`,
-        top: `min(${selection.y + 12}px, calc(100vh - 390px))`
+        "--popover-left": `${selection.x + 12}px`,
+        "--popover-top": `${selection.y + 12}px`
       } as CSSProperties)
     : undefined;
   const profileDisplayName = profile.displayName?.trim() || userEmail || t("profileFallbackName");
@@ -2875,37 +3070,81 @@ export function VocalMapApp({
 
   return (
     <div
-      className={`relative grid h-dvh grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden bg-[#87f0dc] bg-cover bg-center p-3 md:grid-rows-1 ${
-        isSidebarCollapsed ? "md:grid-cols-[4.75rem_minmax(0,1fr)]" : "md:grid-cols-[22rem_minmax(0,1fr)]"
-      }`}
-      style={{ backgroundImage: "url('/images/auth-green-bg.png')" }}
+      className="vocalmap-shell"
+      data-sidebar-collapsed={isSidebarCollapsed}
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(220,255,246,0.18),rgba(35,181,156,0.12)_46%,rgba(12,130,111,0.24)_100%)]" />
+      <div className="vocalmap-backdrop" />
+
+      <header className="mobile-app-bar lg:hidden">
+        <button
+          className="flex min-w-0 items-center gap-2 rounded-xl px-1 py-1 text-left transition hover:bg-white/70 active:scale-[0.98]"
+          type="button"
+          onClick={() => {
+            setIsSidebarCollapsed(false);
+            setIsMobileLibraryOpen(true);
+          }}
+          aria-label={t("openLibrary")}
+          title={t("openLibrary")}
+        >
+          <span className="grid size-10 flex-none place-items-center rounded-xl bg-[var(--vm-ink)] text-white">
+            <Library size={18} />
+          </span>
+          <span className="min-w-0">
+            <Image className="h-auto w-28" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
+            <span className="mt-0.5 block truncate text-[0.625rem] font-bold uppercase tracking-[0.13em] text-stone-500">{t("libraryTitle")}</span>
+          </span>
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className={`mobile-app-bar-action ${isSettingsOpen ? "is-active" : ""}`}
+            type="button"
+            onClick={() => {
+              setIsSettingsOpen((isOpen) => !isOpen);
+              setActiveSettingsPanel("markers");
+              setIsMarkerFormOpen(false);
+              setEditingMarkerId(null);
+              setSelectedMarkerId(null);
+            }}
+            aria-expanded={isSettingsOpen}
+            aria-label={t("settingsTitle")}
+            title={t("settingsTitle")}
+          >
+            <Settings2 size={18} />
+          </button>
+          <button className="mobile-app-bar-action is-primary" type="button" onClick={openManualDraft} aria-label={t("newSong")} title={t("newSong")}>
+            <Plus size={19} />
+          </button>
+        </div>
+      </header>
+
+      {isMobileLibraryOpen ? (
+        <button className="mobile-library-backdrop lg:hidden" type="button" onClick={() => setIsMobileLibraryOpen(false)} aria-label={t("closeLibrary")} />
+      ) : null}
+
       <aside
-        className={`relative z-10 flex min-h-0 overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white shadow-[0_28px_80px_rgba(0,104,83,0.20)] ${
-          isSidebarCollapsed
-            ? "max-h-none flex-row items-center justify-between gap-2 p-2 md:h-full md:flex-col md:items-center md:justify-start"
-            : "max-h-[42dvh] flex-col gap-3 p-3 md:h-full md:max-h-none"
-        }`}
+        className="vocalmap-library"
+        data-collapsed={isSidebarCollapsed}
+        data-mobile-open={isMobileLibraryOpen}
+        aria-label={t("libraryTitle")}
       >
         {isSidebarCollapsed ? (
-          <div className="flex w-full items-center justify-between gap-2 md:w-10 md:flex-col md:justify-start md:gap-2">
+          <div className="hidden w-full items-center justify-between gap-2 lg:flex lg:w-10 lg:flex-col lg:justify-start">
             <button
               className="grid h-10 w-12 flex-none place-items-center rounded-xl px-1 transition hover:bg-emerald-50"
               type="button"
               onClick={() => setIsSidebarCollapsed(false)}
-              aria-label="Open menu"
-              title="Open menu"
+              aria-label={t("expandLibrary")}
+              title={t("expandLibrary")}
             >
               <Image className="h-auto w-full" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
             </button>
-            <div className="flex items-center gap-2 md:w-10 md:flex-col md:items-center md:gap-2">
+            <div className="flex items-center gap-2 lg:w-10 lg:flex-col lg:items-center">
               <button
                 className="inline-grid size-9 flex-none place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
                 type="button"
                 onClick={() => setIsSidebarCollapsed(false)}
-                aria-label="Open menu"
-                title="Open menu"
+                aria-label={t("expandLibrary")}
+                title={t("expandLibrary")}
               >
                 <PanelLeftOpen size={17} />
               </button>
@@ -2920,10 +3159,11 @@ export function VocalMapApp({
                   setIsMarkerFormOpen(false);
                   setEditingMarkerId(null);
                   setSelectedMarkerId(null);
+                  setIsMobileLibraryOpen(false);
                 }}
                 aria-expanded={isSettingsOpen}
-                aria-label="Settings"
-                title="Settings"
+                aria-label={t("settingsTitle")}
+                title={t("settingsTitle")}
               >
                 <Settings2 size={17} />
               </button>
@@ -2956,19 +3196,29 @@ export function VocalMapApp({
                   setIsMarkerFormOpen(false);
                   setEditingMarkerId(null);
                   setSelectedMarkerId(null);
-            }}
-            aria-expanded={isSettingsOpen}
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings2 size={17} />
-          </button>
+                  setIsMobileLibraryOpen(false);
+                }}
+                aria-expanded={isSettingsOpen}
+                aria-label={t("settingsTitle")}
+                title={t("settingsTitle")}
+              >
+                <Settings2 size={17} />
+              </button>
             <button
-              className="inline-grid size-9 flex-none place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+              className="inline-grid size-9 flex-none place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 lg:hidden"
+              type="button"
+              onClick={() => setIsMobileLibraryOpen(false)}
+              aria-label={t("closeLibrary")}
+              title={t("closeLibrary")}
+            >
+              <X size={17} />
+            </button>
+            <button
+              className="hidden size-9 flex-none place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 lg:inline-grid"
               type="button"
               onClick={() => setIsSidebarCollapsed(true)}
-              aria-label="Collapse menu"
-              title="Collapse menu"
+              aria-label={t("collapseLibrary")}
+              title={t("collapseLibrary")}
             >
               <PanelLeftClose size={17} />
             </button>
@@ -2978,9 +3228,9 @@ export function VocalMapApp({
         {activeSong ? (
           <SongMenuCard
             song={activeSong}
-            onUpload={(song, file) => void uploadSongAudio(song, file)}
             onEdit={(song) => {
               setOpenSongOptionsId(null);
+              setIsMobileLibraryOpen(false);
               openSongEditor(song);
             }}
             onDelete={(song) => {
@@ -2995,9 +3245,10 @@ export function VocalMapApp({
               lines: t("linesCount", { count: activeSong.lyrics.length }),
               markers: t("markersCount", { count: countMarkedTargets(activeSong) }),
               spotify: common("spotify"),
-              addFile: t("addAudioFile"),
+              workspaceHint: t("workspaceHint"),
               edit: common("edit"),
-              delete: common("delete")
+              delete: common("delete"),
+              options: t("songOptions")
             }}
           />
         ) : null}
@@ -3052,6 +3303,7 @@ export function VocalMapApp({
                   onClick={() => {
                     setActiveSongId(song.id);
                     setEditingSongId(null);
+                    setIsMobileLibraryOpen(false);
                     closeNoteEditor();
                     setOpenSongOptionsId(null);
                     setSelection(null);
@@ -3080,8 +3332,8 @@ export function VocalMapApp({
                   onClick={() => setOpenSongOptionsId((currentId) => (currentId === `library:${song.id}` ? null : `library:${song.id}`))}
                   aria-expanded={openSongOptionsId === `library:${song.id}`}
                   aria-haspopup="menu"
-                  aria-label="Song options"
-                  title="Song options"
+                  aria-label={t("songOptions")}
+                  title={t("songOptions")}
                 >
                   <Ellipsis size={15} />
                 </button>
@@ -3120,7 +3372,14 @@ export function VocalMapApp({
         </section>
         </div>
 
-        <button className={`${primaryButtonClass} w-full flex-none`} type="button" onClick={openManualDraft}>
+        <button
+          className={`${primaryButtonClass} w-full flex-none`}
+          type="button"
+          onClick={() => {
+            setIsMobileLibraryOpen(false);
+            openManualDraft();
+          }}
+        >
           <Plus size={16} />
           {t("newSong")}
         </button>
@@ -3136,6 +3395,7 @@ export function VocalMapApp({
               });
               setProfileError("");
               setIsProfileMenuOpen(false);
+              setIsMobileLibraryOpen(false);
               setIsProfileModalOpen(true);
             }}
           >
@@ -3155,8 +3415,8 @@ export function VocalMapApp({
             onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
             aria-expanded={isProfileMenuOpen}
             aria-haspopup="menu"
-            aria-label="Profile menu"
-            title="Profile menu"
+            aria-label={t("profileMenu")}
+            title={t("profileMenu")}
           >
             <Ellipsis size={18} />
           </button>
@@ -3175,9 +3435,9 @@ export function VocalMapApp({
         )}
       </aside>
 
-      <section className={`relative z-10 min-h-0 min-w-0 overflow-auto px-2 py-4 sm:px-4 lg:px-5 ${activeAudioProvider && !editingSongId ? "pb-40" : ""}`}>
+      <section className={`vocalmap-workspace ${activeAudioProvider && !editingSongId ? "has-audio-dock" : ""}`}>
         {editingSongId ? (
-          <div className="mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.94] p-5 shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
+          <div className="song-editor-card mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.96] p-4 shadow-[0_28px_80px_rgba(0,104,83,0.16)] backdrop-blur-md sm:p-5">
             <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase text-stone-500">{editingSongId === "new" ? t("editorNew") : t("editorEdit")}</p>
@@ -3339,8 +3599,8 @@ export function VocalMapApp({
             </div>
           </div>
         ) : activeSong ? (
-          <div>
-            <div className="mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.94] px-2 py-5 shadow-[0_28px_80px_rgba(0,104,83,0.16)] backdrop-blur-md sm:px-4 sm:py-8">
+          <article className="lyrics-document">
+            <div className="lyrics-sheet">
               {activeSong.lyrics.length === 0 || activeSong.lyrics.every((line) => line.text.trim().length === 0) ? (
                 <div className="grid min-h-72 place-items-center content-center gap-3 text-center text-stone-500">
                   <FileText size={24} />
@@ -3367,6 +3627,7 @@ export function VocalMapApp({
                     lyricWordsStyle={lyricWordsStyle}
                     labels={{
                       emptyLine: common("emptyLine"),
+                      lineCue: t("lineCue"),
                       lineAudio: t("lineAudioTitle"),
                       wordAudio: t("wordAudioTitle"),
                       note: t("noteTitle")
@@ -3375,7 +3636,7 @@ export function VocalMapApp({
                 ))
               )}
             </div>
-          </div>
+          </article>
         ) : (
           <div className="mx-auto grid h-full min-h-[24rem] max-w-lg place-items-center content-center">
             <div className="grid w-full justify-items-center gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-8 text-center shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
@@ -3391,14 +3652,14 @@ export function VocalMapApp({
         )}
       </section>
 
-      {activeSong && activeAudioProvider && !editingSongId ? (
+      {activeSong && !editingSongId ? (
         <AudioProviderDock
           song={activeSong}
           provider={activeAudioProvider}
           selectedAudioId={selectedSongAudioId}
-          sidebarCollapsed={isSidebarCollapsed}
           onProviderChange={setPreferredAudioProvider}
           onSelectedAudioChange={setSelectedSongAudioId}
+          onUpload={(song, file, label) => void uploadSongAudio(song, file, label)}
           onRemove={(song, audioReference) => void removeSongAudio(song, audioReference)}
           supabase={supabase}
           labels={{
@@ -3408,18 +3669,34 @@ export function VocalMapApp({
             fileSelect: t("audioDockFileSelect"),
             noFile: t("audioDockNoFile"),
             deleteAudio: t("deleteSongAudio"),
-            spotifyTitle: t("spotifyPlayerTitle", { title: activeSong.title })
+            addFile: t("addAudioFile"),
+            audioNameTitle: t("audioNameTitle"),
+            audioNameLabel: t("audioNameLabel"),
+            audioNamePlaceholder: t("audioNamePlaceholder"),
+            audioNameInstrumental: t("audioNameInstrumental"),
+            audioNameOriginal: t("audioNameOriginal"),
+            audioNameCover: t("audioNameCover"),
+            audioNameRequired: t("audioNameRequired"),
+            audioUploadDialogBody: t("audioUploadDialogBody"),
+            chooseAudioFile: t("chooseAudioFile"),
+            changeAudioFile: t("changeAudioFile"),
+            noAudioFile: t("noAudioFile"),
+            cancel: common("cancel"),
+            close: common("close"),
+            spotifyTitle: t("spotifyPlayerTitle", { title: activeSong.title }),
+            expand: t("expandPlayer"),
+            collapse: t("collapsePlayer")
           }}
         />
       ) : null}
 
       {isSettingsOpen ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-stone-950/30 px-4 py-6 backdrop-blur-sm">
-          <section className="grid h-[calc(100dvh-3rem)] max-h-[54rem] w-full max-w-4xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-2xl border border-stone-200 bg-white">
+          <section className="grid h-[calc(100dvh-3rem)] max-h-[54rem] w-full max-w-4xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-2xl border border-stone-200 bg-white" role="dialog" aria-modal="true" aria-labelledby="settings-title">
             <div className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
               <div className="min-w-0">
-                <h2 className="text-base font-semibold text-stone-950">Settings</h2>
-                <p className="mt-0.5 text-xs text-stone-500">Manage workspace preferences.</p>
+                <h2 className="text-base font-semibold text-stone-950" id="settings-title">{t("settingsTitle")}</h2>
+                <p className="mt-0.5 text-xs text-stone-500">{t("settingsSubtitle")}</p>
               </div>
               <button
                 className="inline-grid size-8 flex-none place-items-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-950"
@@ -3787,9 +4064,11 @@ export function VocalMapApp({
 
       {selection && selectedData && !isSelectingWords ? (
         <div
-          className="fixed z-20 w-[min(23.25rem,calc(100vw-1.5rem))] rounded-lg border border-stone-200 bg-white/95 p-3 backdrop-blur"
+          className={`marker-composer ${activeAudioProvider ? "with-audio" : ""}`}
           data-marker-popover="true"
           style={popoverStyle}
+          role="dialog"
+          aria-label={selectedData.type === "line" ? t("selectedLine") : selectedData.type === "range" ? t("selectedRange") : t("selectedWord")}
         >
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -3961,7 +4240,7 @@ export function VocalMapApp({
 
       {statusMessage ? (
         <button
-          className="fixed bottom-5 right-5 z-50 max-w-[min(26rem,calc(100vw-2.5rem))] rounded-lg border border-stone-200 bg-white px-4 py-3 text-left text-sm leading-6 text-stone-700 shadow-xl"
+          className={`status-toast ${activeAudioProvider ? "with-audio" : ""}`}
           type="button"
           onClick={() => setStatusMessage("")}
           role="status"

@@ -50,6 +50,7 @@ export type Database = {
           created_at: string;
           duration_ms: number | null;
           id: string;
+          label: string;
           line_index: number | null;
           mime_type: string;
           size_bytes: number | null;
@@ -64,6 +65,7 @@ export type Database = {
           created_at?: string;
           duration_ms?: number | null;
           id?: string;
+          label?: string;
           line_index?: number | null;
           mime_type: string;
           size_bytes?: number | null;
@@ -78,6 +80,7 @@ export type Database = {
           created_at?: string;
           duration_ms?: number | null;
           id?: string;
+          label?: string;
           line_index?: number | null;
           mime_type?: string;
           size_bytes?: number | null;

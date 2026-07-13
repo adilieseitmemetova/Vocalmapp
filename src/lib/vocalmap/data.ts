@@ -98,6 +98,7 @@ function toMarker(row: MarkerRow): Marker {
 function toAudioReference(row: AudioRow): AudioReference {
   return {
     id: row.id,
+    label: row.label,
     storagePath: row.storage_path,
     mimeType: row.mime_type,
     durationMs: row.duration_ms ?? undefined,

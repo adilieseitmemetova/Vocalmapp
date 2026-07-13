@@ -30,11 +30,11 @@ export default async function LoginPage() {
       <section className="relative z-10 flex w-full max-w-[32rem] flex-col items-center gap-6">
         <div className="grid h-16 w-56 place-items-center">
           <Image
-            className="h-auto w-full"
-            src="/images/vocalmap-logo.svg"
+            className="h-14 w-auto"
+            src="/images/vocalmapp-logo-white.svg"
             alt={common("appName")}
-            width={351}
-            height={102}
+            width={196}
+            height={93}
             priority
           />
         </div>

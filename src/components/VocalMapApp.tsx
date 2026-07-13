@@ -72,13 +72,13 @@ const MARKER_PREFERENCES_STORAGE_PREFIX = "vocalmapp:marker-preferences";
 const LYRIC_TEXT_SIZE_STORAGE_PREFIX = "vocalmapp:lyric-text-size";
 const LYRIC_LINE_SPACING_STORAGE_PREFIX = "vocalmapp:lyric-line-spacing";
 const LYRIC_WORD_SPACING_STORAGE_PREFIX = "vocalmapp:lyric-word-spacing";
-const DEFAULT_LYRIC_TEXT_SIZE = 24;
-const MIN_LYRIC_TEXT_SIZE = 16;
+const DEFAULT_LYRIC_TEXT_SIZE = 18;
+const MIN_LYRIC_TEXT_SIZE = 12;
 const MAX_LYRIC_TEXT_SIZE = 36;
-const DEFAULT_LYRIC_LINE_SPACING = 8;
+const DEFAULT_LYRIC_LINE_SPACING = 4;
 const MIN_LYRIC_LINE_SPACING = 0;
 const MAX_LYRIC_LINE_SPACING = 24;
-const DEFAULT_LYRIC_WORD_SPACING = 8;
+const DEFAULT_LYRIC_WORD_SPACING = 4;
 const MIN_LYRIC_WORD_SPACING = 0;
 const MAX_LYRIC_WORD_SPACING = 24;
 
@@ -162,6 +162,19 @@ function lyricLineSpacingStorageKey(userId: string) {
 
 function lyricWordSpacingStorageKey(userId: string) {
   return `${LYRIC_WORD_SPACING_STORAGE_PREFIX}:${userId}`;
+}
+
+function readStoredLyricValue(storageKey: string, fallback: number, clamp: (value: number) => number) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  try {
+    const value = Number(window.localStorage.getItem(storageKey));
+    return Number.isFinite(value) ? clamp(value) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function shouldRetryMarkerIcon(error: { message?: string } | null, icon: MarkerIconName) {
@@ -294,9 +307,8 @@ function labelFromFileName(fileName: string) {
 
 function countMarkedTargets(song: Song) {
   return song.lyrics.reduce((total, line) => {
-    const lineCount = line.annotations.length > 0 || line.audioReference || line.textNote ? 1 : 0;
     const wordCount = line.words.filter((word) => word.annotations.length > 0 || word.audioReference || word.textNote).length;
-    return total + lineCount + wordCount;
+    return total + wordCount;
   }, 0);
 }
 
@@ -768,7 +780,6 @@ function useAudioUrl(audioReference: AudioReference | undefined, supabase: Retur
 function LyricsLine({
   line,
   songId,
-  onLineSelect,
   onWordPointerDown,
   onWordPointerMove,
   onWordPointerUp,
@@ -776,7 +787,6 @@ function LyricsLine({
   onWordKeyboardSelect,
   onPlayAudio,
   markerById,
-  selectedLineId,
   selectedWordIds,
   lyricTextStyle,
   lyricLineStyle,
@@ -785,7 +795,6 @@ function LyricsLine({
 }: {
   line: LyricLine;
   songId: string;
-  onLineSelect: (lineId: string, element: HTMLElement) => void;
   onWordPointerDown: (event: React.PointerEvent<HTMLElement>, lineId: string, wordId: string) => void;
   onWordPointerMove: (event: React.PointerEvent<HTMLElement>) => void;
   onWordPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
@@ -793,47 +802,18 @@ function LyricsLine({
   onWordKeyboardSelect: (lineId: string, wordId: string, element: HTMLElement) => void;
   onPlayAudio: (audioReference: AudioReference) => void;
   markerById: Map<string, Marker>;
-  selectedLineId: string | null;
   selectedWordIds: Set<string>;
   lyricTextStyle: CSSProperties;
   lyricLineStyle: CSSProperties;
   lyricWordsStyle: CSSProperties;
   labels: {
-    emptyLine: string;
-    lineCue: string;
-    lineAudio: string;
     wordAudio: string;
     note: string;
   };
 }) {
-  const lineIsSelected = selectedLineId === line.id;
-  const lineHasRangeSelection = selectedWordIds.size > 1 && line.words.some((word) => selectedWordIds.has(word.id));
-
   return (
-    <div
-      data-lyric-selection-surface="true"
-      className={`lyrics-line group cursor-pointer ${
-        lineIsSelected || lineHasRangeSelection ? "is-selected" : ""
-      }`}
-      style={lyricLineStyle}
-      onClick={(event) => onLineSelect(line.id, event.currentTarget)}
-    >
-      <div className="min-w-0">
-        {line.annotations.length > 0 || line.audioReference || line.textNote ? (
-          <div className="line-cue-rail">
-            <span className="line-cue-rule" aria-hidden="true" />
-            <div className="line-cue-content">
-              <span className="line-cue-label">{labels.lineCue}</span>
-              {line.annotations.map((annotation) => (
-                <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
-              ))}
-              {line.audioReference ? <AudioDot onPlay={() => onPlayAudio(line.audioReference!)} title={labels.lineAudio} /> : null}
-              {line.textNote ? <NoteDot note={line.textNote} title={labels.note} /> : null}
-            </div>
-            <span className="line-cue-rule" aria-hidden="true" />
-          </div>
-        ) : null}
-        <div className="flex min-w-0 flex-wrap items-start justify-center gap-y-1 text-[var(--vm-ink)]" style={{ ...lyricTextStyle, ...lyricWordsStyle }}>
+    <div className="lyrics-line" style={lyricLineStyle}>
+      <div className="flex w-full min-w-0 flex-wrap items-start justify-center gap-y-1 text-[var(--vm-ink)]" style={{ ...lyricTextStyle, ...lyricWordsStyle }}>
           {line.words.length === 0 ? (
             <span className="min-h-[1.7em]" aria-hidden="true" />
           ) : (
@@ -915,7 +895,6 @@ function LyricsLine({
             );
             })
           )}
-        </div>
       </div>
     </div>
   );
@@ -1380,6 +1359,7 @@ export function VocalMapApp({
   const [lyricTextSize, setLyricTextSize] = useState(DEFAULT_LYRIC_TEXT_SIZE);
   const [lyricLineSpacing, setLyricLineSpacing] = useState(DEFAULT_LYRIC_LINE_SPACING);
   const [lyricWordSpacing, setLyricWordSpacing] = useState(DEFAULT_LYRIC_WORD_SPACING);
+  const [areLyricPreferencesReady, setAreLyricPreferencesReady] = useState(false);
   const [preferredAudioProvider, setPreferredAudioProvider] = useState<AudioProvider>("file");
   const [selectedSongAudioId, setSelectedSongAudioId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -1534,20 +1514,14 @@ export function VocalMapApp({
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      const storedSize = Number(localStorage.getItem(lyricTextSizeStorageKey(userId)));
-      if (Number.isFinite(storedSize)) {
-        setLyricTextSize(clampLyricTextSize(storedSize));
-      }
+      const size = readStoredLyricValue(lyricTextSizeStorageKey(userId), DEFAULT_LYRIC_TEXT_SIZE, clampLyricTextSize);
+      const lineSpacing = readStoredLyricValue(lyricLineSpacingStorageKey(userId), DEFAULT_LYRIC_LINE_SPACING, clampLyricLineSpacing);
+      const wordSpacing = readStoredLyricValue(lyricWordSpacingStorageKey(userId), DEFAULT_LYRIC_WORD_SPACING, clampLyricWordSpacing);
 
-      const storedSpacing = Number(localStorage.getItem(lyricLineSpacingStorageKey(userId)));
-      if (Number.isFinite(storedSpacing)) {
-        setLyricLineSpacing(clampLyricLineSpacing(storedSpacing));
-      }
-
-      const storedWordSpacing = Number(localStorage.getItem(lyricWordSpacingStorageKey(userId)));
-      if (Number.isFinite(storedWordSpacing)) {
-        setLyricWordSpacing(clampLyricWordSpacing(storedWordSpacing));
-      }
+      setLyricTextSize(size);
+      setLyricLineSpacing(lineSpacing);
+      setLyricWordSpacing(wordSpacing);
+      setAreLyricPreferencesReady(true);
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
@@ -1592,7 +1566,6 @@ export function VocalMapApp({
   const selectedMarkerIndex = useMemo(() => visibleMarkers.findIndex((marker) => marker.id === selectedMarkerId), [selectedMarkerId, visibleMarkers]);
   const selectedData = useMemo(() => findSelectedData(activeSong, selection, common("emptyLine")), [activeSong, common, selection]);
   const selectedWordIds = useMemo(() => new Set(activeSong ? selectedWordAddresses(activeSong, selection).map((address) => address.word.id) : []), [activeSong, selection]);
-  const selectedLineId = selection?.type === "line" ? selection.lineId : null;
   const currentTargetKey = selectedTargetKey(selection);
   const songDraftIsComplete = Boolean(draft.title.trim() && draft.artist.trim() && draft.lyricsText.trim());
   const songDraftHasImportedDetails = Boolean(draft.spotifyTrackId || draft.spotifyUrl || draft.albumName || draft.albumArtUrl);
@@ -2433,22 +2406,6 @@ export function VocalMapApp({
     });
   }
 
-  function selectLineFromSide(lineId: string, element: HTMLElement) {
-    if (!activeSong) {
-      return;
-    }
-
-    const rect = element.getBoundingClientRect();
-    closeNoteEditor();
-    setSelection({
-      songId: activeSong.id,
-      type: "line",
-      lineId,
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2
-    });
-  }
-
   function updateSelectedTarget(
     target: SelectedTarget,
     updater: (payload: {
@@ -3090,7 +3047,7 @@ export function VocalMapApp({
             <Library size={18} />
           </span>
           <span className="min-w-0">
-            <Image className="h-auto w-28" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
+            <Image className="h-auto w-28" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
             <span className="mt-0.5 block truncate text-[0.625rem] font-bold uppercase tracking-[0.13em] text-stone-500">{t("libraryTitle")}</span>
           </span>
         </button>
@@ -3136,7 +3093,7 @@ export function VocalMapApp({
               aria-label={t("expandLibrary")}
               title={t("expandLibrary")}
             >
-              <Image className="h-auto w-full" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
+              <Image className="h-auto w-full" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
             </button>
             <div className="flex items-center gap-2 lg:w-10 lg:flex-col lg:items-center">
               <button
@@ -3182,7 +3139,7 @@ export function VocalMapApp({
           <>
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Image className="h-auto w-32 flex-none" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
+            <Image className="h-auto w-32 flex-none" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
           </div>
           <div className="flex flex-none items-center gap-2">
               <button
@@ -3599,7 +3556,7 @@ export function VocalMapApp({
             </div>
           </div>
         ) : activeSong ? (
-          <article className="lyrics-document">
+          <article className="lyrics-document" style={areLyricPreferencesReady ? undefined : { visibility: "hidden" }}>
             <div className="lyrics-sheet">
               {activeSong.lyrics.length === 0 || activeSong.lyrics.every((line) => line.text.trim().length === 0) ? (
                 <div className="grid min-h-72 place-items-center content-center gap-3 text-center text-stone-500">
@@ -3612,7 +3569,6 @@ export function VocalMapApp({
                     key={line.id}
                     line={line}
                     songId={activeSong.id}
-                    onLineSelect={selectLineFromSide}
                     onWordPointerDown={beginWordSelection}
                     onWordPointerMove={updateWordSelectionFromPointer}
                     onWordPointerUp={finishWordSelection}
@@ -3620,15 +3576,11 @@ export function VocalMapApp({
                     onWordKeyboardSelect={selectWordFromKeyboard}
                     onPlayAudio={(audioReference) => void playAudioReference(audioReference)}
                     markerById={markerById}
-                    selectedLineId={selectedLineId}
                     selectedWordIds={selectedWordIds}
                     lyricTextStyle={lyricTextStyle}
                     lyricLineStyle={lyricLineStyle}
                     lyricWordsStyle={lyricWordsStyle}
                     labels={{
-                      emptyLine: common("emptyLine"),
-                      lineCue: t("lineCue"),
-                      lineAudio: t("lineAudioTitle"),
                       wordAudio: t("wordAudioTitle"),
                       note: t("noteTitle")
                     }}
@@ -3640,7 +3592,7 @@ export function VocalMapApp({
         ) : (
           <div className="mx-auto grid h-full min-h-[24rem] max-w-lg place-items-center content-center">
             <div className="grid w-full justify-items-center gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-8 text-center shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
-              <Image className="h-auto w-40" src="/images/vocalmap-logo-green.svg" alt={common("appName")} width={351} height={102} priority />
+              <Image className="h-auto w-40" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
               <h1 className="text-2xl font-bold text-stone-950 sm:text-3xl">{t("emptyWorkspaceTitle")}</h1>
               <p className="max-w-md text-sm leading-6 text-stone-600 sm:text-base sm:leading-7">{t("emptyWorkspaceBody")}</p>
               <button className={`${primaryButtonClass} min-w-36`} type="button" onClick={openManualDraft}>
@@ -3991,7 +3943,7 @@ export function VocalMapApp({
                     <div className="grid gap-2">
                       <p className="text-xs font-semibold uppercase text-stone-500">{t("songTextSizeLabel")}</p>
                       <div className="flex flex-wrap gap-2">
-                      {[18, 24, 30].map((size) => (
+                      {[12, 16, 18].map((size) => (
                         <button
                           className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
                             lyricTextSize === size ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
@@ -4009,7 +3961,7 @@ export function VocalMapApp({
                     <div className="grid gap-2">
                       <p className="text-xs font-semibold uppercase text-stone-500">{t("songTextLineSpacingLabel")}</p>
                       <div className="flex flex-wrap gap-2">
-                        {[4, 8, 16].map((spacing) => (
+                        {[2, 4, 8].map((spacing) => (
                           <button
                             className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
                               lyricLineSpacing === spacing ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
@@ -4027,7 +3979,7 @@ export function VocalMapApp({
                     <div className="grid gap-2">
                       <p className="text-xs font-semibold uppercase text-stone-500">{t("songTextWordSpacingLabel")}</p>
                       <div className="flex flex-wrap gap-2">
-                        {[4, 8, 16].map((spacing) => (
+                        {[2, 4, 8].map((spacing) => (
                           <button
                             className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
                               lyricWordSpacing === spacing ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"

@@ -239,67 +239,12 @@ button:disabled {
 .lyrics-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  width: 100%;
   min-width: 0;
   margin: 0.125rem 0;
   padding-right: 0.375rem;
   padding-left: 0.25rem;
   text-align: center;
-  border: 1px solid transparent;
-  border-radius: 0.875rem;
-  background: transparent;
-  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), border-color 220ms ease, background-color 220ms ease;
-}
-
-.lyrics-line:hover {
-  border-color: rgba(8, 122, 89, 0.13);
-  background: rgba(228, 246, 237, 0.52);
-}
-
-.lyrics-line.is-selected {
-  border-color: rgba(8, 122, 89, 0.26);
-  background: #eaf8f1;
-  box-shadow: inset 3px 0 var(--vm-accent);
-}
-
-.line-cue-rail {
-  display: grid;
-  grid-template-columns: minmax(1.5rem, 1fr) auto minmax(1.5rem, 1fr);
-  align-items: center;
-  gap: 0.625rem;
-  margin: 0.15rem 0 0.85rem;
-}
-
-.line-cue-rule {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(8, 122, 89, 0.32));
-}
-
-.line-cue-rule:last-child {
-  transform: scaleX(-1);
-}
-
-.line-cue-content {
-  display: flex;
-  min-height: 1.75rem;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-}
-
-.line-cue-label {
-  display: inline-flex;
-  min-height: 1.35rem;
-  align-items: center;
-  padding: 0 0.4rem;
-  border-radius: 9999px;
-  background: rgba(8, 122, 89, 0.1);
-  color: var(--vm-accent-strong);
-  font-size: 0.5625rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  line-height: 1;
-  text-transform: uppercase;
 }
 
 .audio-provider-dock {

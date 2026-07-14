@@ -1,4 +1,8 @@
-export type TargetType = "line" | "word";
+import type { YouTubeVersionType } from "@/lib/youtube/types";
+
+export type { YouTubeVideoSearchResult, YouTubeVersionType } from "@/lib/youtube/types";
+
+export type TargetType = "word";
 
 export type MarkerIconName =
   | "up"
@@ -95,15 +99,10 @@ export type WordAnnotation = {
   note?: string;
 };
 
-export type LineAnnotation = {
-  id: string;
-  markerId: string;
-  note?: string;
-};
-
 export type LyricWord = {
   id: string;
   text: string;
+  timestampMs?: number;
   annotations: WordAnnotation[];
   audioReference?: AudioReference;
   textNote?: TextNote;
@@ -113,9 +112,6 @@ export type LyricLine = {
   id: string;
   text: string;
   words: LyricWord[];
-  annotations: LineAnnotation[];
-  audioReference?: AudioReference;
-  textNote?: TextNote;
 };
 
 export type Song = {
@@ -124,10 +120,13 @@ export type Song = {
   lyricsDocumentId?: string;
   title: string;
   artist?: string;
-  albumName?: string;
-  albumArtUrl?: string;
-  spotifyTrackId?: string;
-  spotifyUrl?: string;
+  youtubeVideoId?: string;
+  videoTitle?: string;
+  channelTitle?: string;
+  thumbnailUrl?: string;
+  originalSearchQuery?: string;
+  selectedVersionType?: YouTubeVersionType;
+  source: "youtube" | "manual" | "legacy";
   lyrics: LyricLine[];
   sourceLyricsText: string;
   songAudios: AudioReference[];
@@ -149,18 +148,6 @@ export type UserProfile = {
   onboardingCompleted: boolean;
 };
 
-export type SpotifyTrackResult = {
-  id: string;
-  title: string;
-  artist: string;
-  albumName: string;
-  albumArtUrl: string;
-  durationMs: number;
-  spotifyUrl: string;
-  source?: "spotify" | "lrclib";
-  lyricsText?: string;
-};
-
 export type LyricsMatch = {
   id: number;
   trackName: string;
@@ -174,20 +161,12 @@ export type LyricsMatch = {
 
 export type SelectedTarget = {
   songId: string;
-  type: TargetType;
+  type: "word";
   lineId: string;
+  wordId: string;
   x: number;
   y: number;
-} & (
-  | {
-      type: "line";
-      wordId?: never;
-    }
-  | {
-      type: "word";
-      wordId: string;
-    }
-);
+};
 
 export type SelectedWordPoint = {
   lineId: string;
@@ -210,9 +189,11 @@ export type SongDraft = {
   title: string;
   artist: string;
   lyricsText: string;
-  albumName?: string;
-  albumArtUrl?: string;
-  spotifyTrackId?: string;
-  spotifyUrl?: string;
+  youtubeVideoId?: string;
+  videoTitle?: string;
+  channelTitle?: string;
+  thumbnailUrl?: string;
+  originalSearchQuery?: string;
+  selectedVersionType?: YouTubeVersionType;
   durationMs?: number;
 };

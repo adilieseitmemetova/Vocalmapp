@@ -12,20 +12,18 @@ The primary user is a singer learning and rehearsing songs. Common situations in
 
 1. Sign in with a Supabase email one-time code.
 2. View a protected dashboard of personal songs.
-3. Create a song manually.
-4. Search Spotify metadata when credentials are configured.
-5. Fall back to LRCLIB search when Spotify is unavailable.
-6. Import title, artist, album, cover art, duration, Spotify URL, and available lyrics.
-7. Paste or edit lyrics manually.
-8. View lyrics by line with clickable words.
-9. Add one or more vocal markers to a line.
-10. Add one or more vocal markers to a word.
-11. Upload a song audio or backing track.
-12. Record a short reference audio for a line or word.
-13. Play or delete stored audio references.
-14. Create custom vocal markers.
-15. Delete custom markers and remove their annotations.
-16. Return later and see all saved maps from Supabase.
+3. Search YouTube through a protected server route.
+4. Compare matching video versions and explicitly choose one.
+5. Save the selected YouTube video ID, title, channel, thumbnail, duration, search query, and version type.
+6. Paste or edit lyrics manually, or import available lyrics from LRCLIB.
+7. Play the selected video inside the official YouTube player.
+8. Sync words and markers to saved player timestamps.
+9. Replace a selected YouTube video without deleting a vocal map.
+10. Upload a private practice audio file or record a short reference audio for a word.
+11. Play or delete stored audio references.
+12. Create custom vocal markers.
+13. Delete custom markers and remove their annotations.
+14. Return later and see all saved maps from Supabase.
 
 ## Data Model
 
@@ -38,6 +36,7 @@ The schema is normalized for ownership, RLS, and future product growth:
 - `markers`: system markers and user-owned custom markers.
 - `annotations`: line or word marker placements.
 - `audio_references`: song, line, or word audio metadata.
+- `lyric_timestamps`: user-owned word timestamps used to seek the YouTube player.
 - `storage.objects`: private audio files in the `vocalmap-audio` bucket.
 
 ## Security Requirements
@@ -57,8 +56,7 @@ English is the default language. User-facing text is managed through `messages/e
 
 - Automatic vocal analysis.
 - Audio transcription.
-- Word-level time synchronization.
 - Sheet music notation.
 - Social sharing.
-- Downloading music from Spotify.
-- Using Spotify as a lyrics provider.
+- Downloading, extracting, proxying, or storing YouTube audio.
+- Automatic AI analysis of YouTube audio.

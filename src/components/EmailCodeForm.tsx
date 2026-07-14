@@ -194,7 +194,6 @@ export function EmailCodeForm() {
     }
 
     router.replace("/dashboard");
-    router.refresh();
   }
 
   function handleCodeChange(value: string) {

@@ -33,14 +33,14 @@ import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 
+import { SongSearch } from "@/components/SongSearch";
+import { YouTubePlayer } from "@/components/YouTubePlayer";
 import {
   LYRICS_TOKENIZER_VERSION,
   buildLyrics,
   findLyricsForTrack,
   lineWordCountsFromText,
-  lyricsTextFromMatch,
   lyricsToText,
-  searchLyricsCatalog,
   syncedLyricsToPlainText
 } from "@/lyrics";
 import type { TablesInsert } from "@/lib/database.types";
@@ -49,7 +49,6 @@ import { MARKER_ICON_OPTIONS, markerIcons } from "@/markers";
 import type {
   AudioReference,
   InitialVocalMapData,
-  LineAnnotation,
   LyricsSelection,
   LyricLine,
   LyricWord,
@@ -60,15 +59,17 @@ import type {
   SelectedWordPoint,
   Song,
   SongDraft,
-  SpotifyTrackResult,
   TextNote,
+  YouTubeVideoSearchResult,
   UserProfile,
   WordAnnotation
 } from "@/types";
+import type { YouTubePlayerErrorCode } from "@/lib/youtube/types";
 
 const AUDIO_BUCKET = "vocalmap-audio";
 const PROFILE_STORAGE_KEY = "vocalmapp:profile:v1";
 const MARKER_PREFERENCES_STORAGE_PREFIX = "vocalmapp:marker-preferences";
+const ACTIVE_SONG_STORAGE_PREFIX = "vocalmapp:active-song";
 const LYRIC_TEXT_SIZE_STORAGE_PREFIX = "vocalmapp:lyric-text-size";
 const LYRIC_LINE_SPACING_STORAGE_PREFIX = "vocalmapp:lyric-line-spacing";
 const LYRIC_WORD_SPACING_STORAGE_PREFIX = "vocalmapp:lyric-word-spacing";
@@ -104,17 +105,7 @@ type MarkerPreferences = {
   markerOrderIds: string[];
 };
 type SettingsPanel = "markers" | "lyrics";
-type AudioProvider = "spotify" | "file";
-type SpotifySearchErrorCode = "authRequired" | "queryRequired" | "queryTooLong" | "searchFailed" | "missingCredentials" | "unavailable";
-
-const spotifySearchErrorMessageKeys: Record<SpotifySearchErrorCode, string> = {
-  authRequired: "spotifyAuthRequired",
-  queryRequired: "queryRequired",
-  queryTooLong: "spotifyQueryTooLong",
-  searchFailed: "spotifySearchFailed",
-  missingCredentials: "spotifyMissingCredentials",
-  unavailable: "spotifyUnavailable"
-};
+type AudioProvider = "youtube" | "file";
 const systemMarkerCodes = new Set([
   "up",
   "down",
@@ -322,10 +313,6 @@ function collectAudioPaths(song: Song) {
   }
 
   for (const line of song.lyrics) {
-    if (line.audioReference?.storagePath) {
-      paths.add(line.audioReference.storagePath);
-    }
-
     for (const word of line.words) {
       if (word.audioReference?.storagePath) {
         paths.add(word.audioReference.storagePath);
@@ -345,26 +332,16 @@ function collectRemovedAudioPaths(previousSong: Song | undefined, nextSong: Song
   return collectAudioPaths(previousSong).filter((path) => !nextPaths.has(path));
 }
 
-function getSpotifyTrackEmbedId(song: Song) {
-  if (song.spotifyTrackId) {
-    return song.spotifyTrackId;
-  }
-
-  if (!song.spotifyUrl) {
-    return "";
-  }
-
-  try {
-    const url = new URL(song.spotifyUrl);
-    const [, type, id] = url.pathname.split("/");
-    return type === "track" ? id : "";
-  } catch {
-    return "";
-  }
+function getYouTubeVideoId(song: Song) {
+  return song.youtubeVideoId ?? "";
 }
 
 function markerPreferencesKey(userId: string) {
   return `${MARKER_PREFERENCES_STORAGE_PREFIX}:${userId}`;
+}
+
+function activeSongStorageKey(userId: string) {
+  return `${ACTIVE_SONG_STORAGE_PREFIX}:${userId}`;
 }
 
 function songToDraft(song: Song): SongDraft {
@@ -373,10 +350,12 @@ function songToDraft(song: Song): SongDraft {
     title: song.title,
     artist: song.artist ?? "",
     lyricsText: lyricsToText(song.lyrics),
-    albumName: song.albumName,
-    albumArtUrl: song.albumArtUrl,
-    spotifyTrackId: song.spotifyTrackId,
-    spotifyUrl: song.spotifyUrl,
+    youtubeVideoId: song.youtubeVideoId,
+    videoTitle: song.videoTitle,
+    channelTitle: song.channelTitle,
+    thumbnailUrl: song.thumbnailUrl,
+    originalSearchQuery: song.originalSearchQuery,
+    selectedVersionType: song.selectedVersionType,
     durationMs: song.durationMs
   };
 }
@@ -392,10 +371,13 @@ function buildSongFromDraft(draft: SongDraft, fallbackTitle: string, existingSon
     lyricsDocumentId: existingSong?.lyricsDocumentId,
     title: draft.title.trim() || fallbackTitle,
     artist: draft.artist.trim() || undefined,
-    albumName: draft.albumName,
-    albumArtUrl: draft.albumArtUrl,
-    spotifyTrackId: draft.spotifyTrackId,
-    spotifyUrl: draft.spotifyUrl,
+    youtubeVideoId: draft.youtubeVideoId,
+    videoTitle: draft.videoTitle,
+    channelTitle: draft.channelTitle,
+    thumbnailUrl: draft.thumbnailUrl,
+    originalSearchQuery: draft.originalSearchQuery,
+    selectedVersionType: draft.selectedVersionType,
+    source: draft.youtubeVideoId ? "youtube" : existingSong?.source ?? "manual",
     durationMs: draft.durationMs,
     sourceLyricsText: draft.lyricsText,
     lyrics,
@@ -431,18 +413,12 @@ type TargetCoordinates = {
 
 type SelectedData =
   | {
-      type: "line";
-      label: string;
-      annotations: LineAnnotation[];
-      audioReference?: AudioReference;
-      textNote?: TextNote;
-    }
-  | {
       type: "word";
       label: string;
       annotations: WordAnnotation[];
       audioReference?: AudioReference;
       textNote?: TextNote;
+      timestampMs?: number;
     }
   | {
       type: "range";
@@ -489,7 +465,7 @@ function findWordAddressIndex(addresses: SelectedWordAddress[], point: SelectedW
 }
 
 function selectedWordAddresses(song: Song, selection: LyricsSelection | null) {
-  if (!selection || selection.type === "line") {
+  if (!selection) {
     return [];
   }
 
@@ -514,14 +490,6 @@ function getTargetCoordinates(song: Song, target: SelectedTarget): TargetCoordin
   const lineIndex = song.lyrics.findIndex((line) => line.id === target.lineId);
   if (lineIndex < 0) {
     return null;
-  }
-
-  if (target.type === "line") {
-    return {
-      userSongId: song.id,
-      lineIndex,
-      wordIndex: null
-    };
   }
 
   const wordIndex = song.lyrics[lineIndex]?.words.findIndex((word) => word.id === target.wordId) ?? -1;
@@ -596,13 +564,7 @@ function selectionShiftAnchor(song: Song | undefined, selection: LyricsSelection
     return { lineId: selection.lineId, wordId: selection.wordId };
   }
 
-  if (selection.type === "range") {
-    return selection.anchor;
-  }
-
-  const line = song.lyrics.find((item) => item.id === selection.lineId);
-  const firstWord = line?.words[0];
-  return firstWord ? { lineId: line.id, wordId: firstWord.id } : null;
+  return selection.anchor;
 }
 
 function wordPointFromElement(element: Element | null): (SelectedWordPoint & { songId: string }) | null {
@@ -640,7 +602,7 @@ function makeWordOrRangeSelection(songId: string, anchor: SelectedWordPoint, foc
   };
 }
 
-function findSelectedData(song: Song | undefined, selection: LyricsSelection | null, emptyLineLabel: string): SelectedData | null {
+function findSelectedData(song: Song | undefined, selection: LyricsSelection | null): SelectedData | null {
   if (!song || !selection) {
     return null;
   }
@@ -671,16 +633,6 @@ function findSelectedData(song: Song | undefined, selection: LyricsSelection | n
     return null;
   }
 
-  if (selection.type === "line") {
-    return {
-      type: "line" as const,
-      label: line.text.trim() || emptyLineLabel,
-      annotations: line.annotations,
-      audioReference: line.audioReference,
-      textNote: line.textNote
-    };
-  }
-
   const word = line.words.find((item) => item.id === selection.wordId);
   if (!word) {
     return null;
@@ -695,7 +647,7 @@ function findSelectedData(song: Song | undefined, selection: LyricsSelection | n
   };
 }
 
-function MarkerBadge({ markerId, markerById }: { markerId: string; markerById: Map<string, Marker> }) {
+function MarkerBadge({ markerId, markerById, onSeekToTimestamp }: { markerId: string; markerById: Map<string, Marker>; onSeekToTimestamp?: () => void }) {
   const marker = markerById.get(markerId);
   if (!marker) {
     return null;
@@ -703,14 +655,29 @@ function MarkerBadge({ markerId, markerById }: { markerId: string; markerById: M
 
   const Icon = markerIcons[marker.icon];
 
-  return (
+  const className = "inline-flex h-5 max-w-28 items-center gap-1 overflow-hidden rounded-full border px-1.5 text-[0.625rem] font-bold leading-none";
+  const content = <><Icon size={11} strokeWidth={2.4} /><span className="truncate">{marker.label}</span></>;
+
+  return onSeekToTimestamp ? (
+    <button
+      className={`${className} transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-emerald-200`}
+      type="button"
+      style={makeMarkerStyle(marker)}
+      title={marker.meaning}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSeekToTimestamp();
+      }}
+    >
+      {content}
+    </button>
+  ) : (
     <span
-      className="inline-flex h-5 max-w-28 items-center gap-1 overflow-hidden rounded-full border px-1.5 text-[0.625rem] font-bold leading-none"
+      className={className}
       style={makeMarkerStyle(marker)}
       title={marker.meaning}
     >
-      <Icon size={11} strokeWidth={2.4} />
-      <span className="truncate">{marker.label}</span>
+      {content}
     </span>
   );
 }
@@ -785,6 +752,7 @@ function LyricsLine({
   onWordPointerUp,
   onWordPointerCancel,
   onWordKeyboardSelect,
+  onSeekToTimestamp,
   onPlayAudio,
   markerById,
   selectedWordIds,
@@ -800,6 +768,7 @@ function LyricsLine({
   onWordPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
   onWordPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
   onWordKeyboardSelect: (lineId: string, wordId: string, element: HTMLElement) => void;
+  onSeekToTimestamp: (timestampMs: number) => void;
   onPlayAudio: (audioReference: AudioReference) => void;
   markerById: Map<string, Marker>;
   selectedWordIds: Set<string>;
@@ -812,7 +781,14 @@ function LyricsLine({
   };
 }) {
   return (
-    <div className="lyrics-line" style={lyricLineStyle}>
+    <div
+      className="lyrics-line"
+      style={lyricLineStyle}
+      onDoubleClick={() => {
+        const timestampMs = line.words.find((word) => typeof word.timestampMs === "number")?.timestampMs;
+        if (typeof timestampMs === "number") onSeekToTimestamp(timestampMs);
+      }}
+    >
       <div className="flex w-full min-w-0 flex-wrap items-start justify-center gap-y-1 text-[var(--vm-ink)]" style={{ ...lyricTextStyle, ...lyricWordsStyle }}>
           {line.words.length === 0 ? (
             <span className="min-h-[1.7em]" aria-hidden="true" />
@@ -838,7 +814,7 @@ function LyricsLine({
                     );
                   })}
                   {annotationsToShow.map((annotation) => (
-                    <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} />
+                    <MarkerBadge key={annotation.id} markerId={annotation.markerId} markerById={markerById} onSeekToTimestamp={typeof word.timestampMs === "number" ? () => onSeekToTimestamp(word.timestampMs!) : undefined} />
                   ))}
                   {word.audioReference ? <AudioDot onPlay={() => onPlayAudio(word.audioReference!)} title={labels.wordAudio} /> : null}
                   {word.textNote ? <NoteDot note={word.textNote} title={labels.note} /> : null}
@@ -861,6 +837,12 @@ function LyricsLine({
                       event.stopPropagation();
                       if (event.detail === 0) {
                         onWordKeyboardSelect(line.id, word.id, event.currentTarget);
+                      }
+                    }}
+                    onDoubleClick={(event) => {
+                      if (typeof word.timestampMs === "number") {
+                        event.stopPropagation();
+                        onSeekToTimestamp(word.timestampMs);
                       }
                     }}
                     onKeyDown={(event) => {
@@ -918,7 +900,7 @@ function SongMenuCard({
     noArtist: string;
     lines: string;
     markers: string;
-    spotify: string;
+    youtube: string;
     workspaceHint: string;
     edit: string;
     delete: string;
@@ -926,10 +908,10 @@ function SongMenuCard({
   };
 }) {
   return (
-    <section className="relative grid grid-cols-[5.25rem_minmax(0,1fr)] gap-3 border-t border-stone-200/80 pt-4 pb-1">
-      <div className="relative aspect-square overflow-hidden rounded-[1.125rem] border border-stone-200 bg-stone-100 shadow-[0_10px_24px_rgba(33,63,53,0.10)]">
-        {song.albumArtUrl ? (
-          <Image className="size-full object-cover" src={song.albumArtUrl} alt={labels.coverAlt} width={640} height={640} priority loading="eager" />
+    <section className="relative grid gap-3 border-t border-stone-200/80 pt-4 pb-1">
+      <div className="relative aspect-square w-full overflow-hidden rounded-[1.125rem] border border-stone-200 bg-stone-100 shadow-[0_10px_24px_rgba(33,63,53,0.10)]">
+        {song.thumbnailUrl ? (
+          <Image className="size-full object-cover" src={song.thumbnailUrl} alt={labels.coverAlt} width={640} height={640} priority loading="eager" />
         ) : (
           <div className="grid size-full place-items-center bg-stone-50 text-stone-500">
             <Music2 size={28} />
@@ -980,16 +962,16 @@ function SongMenuCard({
         ) : null}
       </div>
 
-      <div className="col-span-2 grid gap-2">
-        {song.spotifyUrl ? (
+      <div className="grid gap-2">
+        {song.youtubeVideoId ? (
           <a
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-stone-950 px-3 text-xs font-semibold text-white transition hover:bg-stone-800"
-            href={song.spotifyUrl}
+            href={`https://www.youtube.com/watch?v=${encodeURIComponent(song.youtubeVideoId)}`}
             target="_blank"
             rel="noreferrer"
           >
             <ExternalLink size={13} />
-            {labels.spotify}
+            {labels.youtube}
           </a>
         ) : null}
         <p className="text-center text-[0.6875rem] font-medium leading-4 text-stone-400">{labels.workspaceHint}</p>
@@ -999,7 +981,7 @@ function SongMenuCard({
   );
 }
 
-function AudioProviderDock({
+function SongPlayerDock({
   song,
   provider,
   selectedAudioId,
@@ -1007,6 +989,9 @@ function AudioProviderDock({
   onSelectedAudioChange,
   onUpload,
   onRemove,
+  seekRequest,
+  onTimeUpdate,
+  onPlayerError,
   supabase,
   labels
 }: {
@@ -1017,10 +1002,13 @@ function AudioProviderDock({
   onSelectedAudioChange: (audioId: string) => void;
   onUpload: (song: Song, file: File, label: string) => void;
   onRemove: (song: Song, audioReference: AudioReference) => void;
+  seekRequest?: { id: number; timeMs: number };
+  onTimeUpdate: (timeMs: number) => void;
+  onPlayerError: (errorCode: YouTubePlayerErrorCode) => void;
   supabase: ReturnType<typeof createClient>;
   labels: {
     nowPlaying: string;
-    spotify: string;
+    youtube: string;
     file: string;
     fileSelect: string;
     noFile: string;
@@ -1039,7 +1027,8 @@ function AudioProviderDock({
     noAudioFile: string;
     cancel: string;
     close: string;
-    spotifyTitle: string;
+    youtubeTitle: string;
+    audioNotice: string;
     expand: string;
     collapse: string;
   };
@@ -1048,10 +1037,10 @@ function AudioProviderDock({
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [pendingUpload, setPendingUpload] = useState<File | null>(null);
   const [pendingUploadLabel, setPendingUploadLabel] = useState("");
-  const trackId = getSpotifyTrackEmbedId(song);
-  const hasSpotify = Boolean(trackId);
+  const videoId = getYouTubeVideoId(song);
+  const hasYouTube = Boolean(videoId);
   const hasFiles = song.songAudios.length > 0;
-  const hasActiveProvider = (provider === "spotify" && hasSpotify) || (provider === "file" && hasFiles);
+  const hasActiveProvider = (provider === "youtube" && hasYouTube) || (provider === "file" && hasFiles);
   const activeAudio = song.songAudios.find((audioReference) => audioReference.id === selectedAudioId) ?? song.songAudios[0];
   const fileUrl = useAudioUrl(provider === "file" ? activeAudio : undefined, supabase);
 
@@ -1076,7 +1065,7 @@ function AudioProviderDock({
     <div className="audio-provider-dock">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          {song.albumArtUrl ? <Image className="size-11 flex-none rounded-[0.8rem] object-cover" src={song.albumArtUrl} alt={labels.nowPlaying} width={44} height={44} /> : <span className="grid size-11 flex-none place-items-center rounded-[0.8rem] bg-stone-100"><Music2 className="text-stone-500" size={20} /></span>}
+          {song.thumbnailUrl ? <Image className="size-11 flex-none rounded-[0.8rem] object-cover" src={song.thumbnailUrl} alt={labels.nowPlaying} width={44} height={44} /> : <span className="grid size-11 flex-none place-items-center rounded-[0.8rem] bg-stone-100"><Music2 className="text-stone-500" size={20} /></span>}
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold tracking-[-0.01em] text-stone-950">{song.title}</p>
             <p className="truncate text-xs text-stone-500">{provider === "file" && activeAudio ? activeAudio.label : song.artist ?? labels.nowPlaying}</p>
@@ -1084,26 +1073,27 @@ function AudioProviderDock({
         </div>
 
         <div className="flex items-center gap-1.5">
-          {hasSpotify ? (
+          {hasYouTube ? (
             <button
               className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-[0.6875rem] font-semibold transition sm:px-3 sm:text-xs ${
-                provider === "spotify" ? "border-stone-950 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
+                provider === "youtube" ? "border-stone-950 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
               }`}
               type="button"
-              onClick={() => onProviderChange("spotify")}
+              onClick={() => onProviderChange("youtube")}
             >
-              {labels.spotify}
+              {labels.youtube}
             </button>
           ) : null}
           {hasFiles ? (
             <button
-              className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-[0.6875rem] font-semibold transition sm:px-3 sm:text-xs ${
+              className={`inline-flex h-8 max-w-36 items-center justify-center rounded-full border px-2.5 text-[0.6875rem] font-semibold transition sm:px-3 sm:text-xs ${
                 provider === "file" ? "border-emerald-600 bg-emerald-600 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
               }`}
               type="button"
               onClick={() => onProviderChange("file")}
+              title={activeAudio?.label ?? labels.file}
             >
-              {labels.file}
+              <span className="truncate">{activeAudio?.label ?? labels.file}</span>
             </button>
           ) : null}
           <button
@@ -1135,14 +1125,28 @@ function AudioProviderDock({
       </div>
 
       <div className={`audio-provider-body ${hasActiveProvider ? "mt-2" : ""} ${isExpanded ? "is-expanded" : ""}`}>
-        {provider === "spotify" && trackId ? (
-          <iframe
-            className="block h-20 w-full rounded-xl"
-            title={labels.spotifyTitle}
-            src={`https://open.spotify.com/embed/track/${encodeURIComponent(trackId)}?utm_source=generator`}
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"
-          />
+        {provider === "youtube" && videoId ? (
+          <div className="grid gap-2">
+            <YouTubePlayer
+              videoId={videoId}
+              title={labels.youtubeTitle}
+              seekRequest={seekRequest}
+              onTimeUpdate={onTimeUpdate}
+              onError={onPlayerError}
+              labels={{
+                play: "Play",
+                pause: "Pause",
+                rewind: "Back 10 seconds",
+                forward: "Forward 10 seconds",
+                speed: "Playback speed",
+                loopStart: "Set loop start",
+                loopEnd: "Set loop end",
+                clearLoop: "Clear loop",
+                playerUnavailable: "Loading the official YouTube player..."
+              }}
+            />
+            <p className="text-xs leading-5 text-stone-500">{labels.audioNotice}</p>
+          </div>
         ) : null}
         {provider === "file" && hasFiles ? (
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
@@ -1348,11 +1352,8 @@ export function VocalMapApp({
   const [pendingSongAudioFile, setPendingSongAudioFile] = useState<File | null>(null);
   const [selection, setSelection] = useState<LyricsSelection | null>(null);
   const [isSelectingWords, setIsSelectingWords] = useState(false);
-  const [spotifyQuery, setSpotifyQuery] = useState("");
-  const [spotifyResults, setSpotifyResults] = useState<SpotifyTrackResult[]>([]);
-  const [spotifyMessage, setSpotifyMessage] = useState("");
-  const [isSearchingSpotify, setIsSearchingSpotify] = useState(false);
-  const [importingTrackId, setImportingTrackId] = useState<string | null>(null);
+  const [playerTimeMs, setPlayerTimeMs] = useState(0);
+  const [playerSeekRequest, setPlayerSeekRequest] = useState<{ id: number; timeMs: number } | undefined>();
   const [recordingTarget, setRecordingTarget] = useState("");
   const [isNoteEditorOpen, setIsNoteEditorOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
@@ -1360,7 +1361,7 @@ export function VocalMapApp({
   const [lyricLineSpacing, setLyricLineSpacing] = useState(DEFAULT_LYRIC_LINE_SPACING);
   const [lyricWordSpacing, setLyricWordSpacing] = useState(DEFAULT_LYRIC_WORD_SPACING);
   const [areLyricPreferencesReady, setAreLyricPreferencesReady] = useState(false);
-  const [preferredAudioProvider, setPreferredAudioProvider] = useState<AudioProvider>("file");
+  const [preferredAudioProvider, setPreferredAudioProvider] = useState<AudioProvider>("youtube");
   const [selectedSongAudioId, setSelectedSongAudioId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -1528,6 +1529,21 @@ export function VocalMapApp({
   }, [userId]);
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      try {
+        const storedSongId = window.localStorage.getItem(activeSongStorageKey(userId));
+        if (storedSongId) {
+          setActiveSongId(storedSongId);
+        }
+      } catch {
+        // Keeping the server-provided initial song is the safe fallback when storage is unavailable.
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [userId]);
+
+  useEffect(() => {
     if (isLibrarySearchOpen) {
       librarySearchInputRef.current?.focus();
     }
@@ -1545,30 +1561,28 @@ export function VocalMapApp({
     return () => window.clearTimeout(timeoutId);
   }, [statusMessage, t]);
 
-  const effectiveActiveSongId = activeSongId ?? songs[0]?.id ?? null;
+  const effectiveActiveSongId = songs.some((song) => song.id === activeSongId) ? activeSongId : songs[0]?.id ?? null;
   const activeSong = useMemo(() => songs.find((song) => song.id === effectiveActiveSongId), [effectiveActiveSongId, songs]);
-  const activeSongHasSpotify = Boolean(activeSong && getSpotifyTrackEmbedId(activeSong));
+  const activeSongHasYouTube = Boolean(activeSong && getYouTubeVideoId(activeSong));
   const activeSongHasFiles = Boolean(activeSong && activeSong.songAudios.length > 0);
   const activeAudioProvider: AudioProvider =
-    preferredAudioProvider === "file" && activeSongHasFiles
-      ? "file"
-      : preferredAudioProvider === "spotify" && activeSongHasSpotify
-        ? "spotify"
-        : activeSongHasFiles
-          ? "file"
-          : activeSongHasSpotify
-            ? "spotify"
-            : "file";
+    preferredAudioProvider === "youtube" && activeSongHasYouTube
+      ? "youtube"
+      : preferredAudioProvider === "file" && activeSongHasFiles
+        ? "file"
+        : activeSongHasYouTube
+          ? "youtube"
+          : "file";
   const markerById = useMemo(() => new Map(markers.map((marker) => [marker.id, marker])), [markers]);
   const orderedMarkers = useMemo(() => applyMarkerOrder(markers, markerOrderIds), [markerOrderIds, markers]);
   const visibleMarkers = useMemo(() => orderedMarkers.filter((marker) => !marker.isSystem || !hiddenSystemMarkerIds.has(marker.id)), [hiddenSystemMarkerIds, orderedMarkers]);
   const selectedMarker = useMemo(() => visibleMarkers.find((marker) => marker.id === selectedMarkerId) ?? null, [selectedMarkerId, visibleMarkers]);
   const selectedMarkerIndex = useMemo(() => visibleMarkers.findIndex((marker) => marker.id === selectedMarkerId), [selectedMarkerId, visibleMarkers]);
-  const selectedData = useMemo(() => findSelectedData(activeSong, selection, common("emptyLine")), [activeSong, common, selection]);
+  const selectedData = useMemo(() => findSelectedData(activeSong, selection), [activeSong, selection]);
   const selectedWordIds = useMemo(() => new Set(activeSong ? selectedWordAddresses(activeSong, selection).map((address) => address.word.id) : []), [activeSong, selection]);
   const currentTargetKey = selectedTargetKey(selection);
-  const songDraftIsComplete = Boolean(draft.title.trim() && draft.artist.trim() && draft.lyricsText.trim());
-  const songDraftHasImportedDetails = Boolean(draft.spotifyTrackId || draft.spotifyUrl || draft.albumName || draft.albumArtUrl);
+  const songDraftIsComplete = Boolean(draft.title.trim() && draft.youtubeVideoId);
+  const songDraftHasImportedDetails = Boolean(draft.youtubeVideoId && draft.videoTitle && draft.channelTitle);
   const lyricTextStyle = useMemo<CSSProperties>(
     () => ({
       fontSize: `${lyricTextSize}px`,
@@ -1607,9 +1621,50 @@ export function VocalMapApp({
     await supabase.storage.from(AUDIO_BUCKET).remove(uniquePaths);
   }
 
+  useEffect(() => {
+    async function purgeLineTargets() {
+      const audioResult = await supabase
+        .from("audio_references")
+        .select("storage_path")
+        .eq("user_id", userId)
+        .eq("target_type", "line");
+
+      const [annotationsResult, notesResult, audioDeleteResult] = await Promise.all([
+        supabase.from("annotations").delete().eq("user_id", userId).eq("target_type", "line"),
+        supabase.from("target_notes").delete().eq("user_id", userId).eq("target_type", "line"),
+        supabase.from("audio_references").delete().eq("user_id", userId).eq("target_type", "line")
+      ]);
+
+      if (annotationsResult.error || notesResult.error || audioDeleteResult.error || audioResult.error) {
+        return;
+      }
+
+      const storagePaths = (audioResult.data ?? []).map((audio) => audio.storage_path);
+      if (storagePaths.length > 0) {
+        await supabase.storage.from(AUDIO_BUCKET).remove(storagePaths);
+      }
+    }
+
+    void purgeLineTargets();
+  }, [supabase, userId]);
+
   function closeNoteEditor() {
     setIsNoteEditorOpen(false);
     setNoteDraft("");
+  }
+
+  function activateSong(songId: string | null) {
+    setActiveSongId(songId);
+
+    try {
+      if (songId) {
+        window.localStorage.setItem(activeSongStorageKey(userId), songId);
+      } else {
+        window.localStorage.removeItem(activeSongStorageKey(userId));
+      }
+    } catch {
+      // The active song still works for this session if storage is unavailable.
+    }
   }
 
   function updateLyricTextSize(nextSize: number) {
@@ -1634,9 +1689,6 @@ export function VocalMapApp({
     setEditingSongId("new");
     setDraft(EMPTY_DRAFT);
     setPendingSongAudioFile(null);
-    setSpotifyQuery("");
-    setSpotifyResults([]);
-    setSpotifyMessage("");
     closeNoteEditor();
     setSelection(null);
   }
@@ -1770,8 +1822,8 @@ export function VocalMapApp({
   }
 
   async function findOrCreateTrack(song: Song) {
-    const source = song.spotifyTrackId ? "spotify" : "manual";
-    const sourceTrackId = song.spotifyTrackId ?? null;
+    const source = song.youtubeVideoId ? "youtube" : "manual";
+    const sourceTrackId = song.youtubeVideoId ?? null;
 
     if (sourceTrackId) {
       const existingTrack = await supabase
@@ -1788,26 +1840,24 @@ export function VocalMapApp({
         return existingTrack.data.id;
       }
 
-      const existingSpotifyTrack = await supabase.from("tracks").select("id").eq("created_by", userId).eq("spotify_track_id", sourceTrackId).maybeSingle();
-      if (existingSpotifyTrack.error) {
-        throw existingSpotifyTrack.error;
-      }
-      if (existingSpotifyTrack.data?.id) {
-        return existingSpotifyTrack.data.id;
-      }
+      const existingVideoTrack = await supabase.from("tracks").select("id").eq("created_by", userId).eq("youtube_video_id", sourceTrackId).maybeSingle();
+      if (existingVideoTrack.error) throw existingVideoTrack.error;
+      if (existingVideoTrack.data?.id) return existingVideoTrack.data.id;
     }
 
     const trackRow: TablesInsert<"tracks"> = {
       created_by: userId,
       source,
       source_track_id: sourceTrackId,
-      spotify_track_id: song.spotifyTrackId ?? null,
       title: song.title,
       artist: song.artist ?? null,
-      album_name: song.albumName ?? null,
-      album_art_url: song.albumArtUrl ?? null,
-      spotify_url: song.spotifyUrl ?? null,
-      duration_ms: song.durationMs ?? null
+      duration_ms: song.durationMs ?? null,
+      youtube_video_id: song.youtubeVideoId ?? null,
+      video_title: song.videoTitle ?? null,
+      channel_title: song.channelTitle ?? null,
+      thumbnail_url: song.thumbnailUrl ?? null,
+      original_search_query: song.originalSearchQuery ?? null,
+      selected_version_type: song.selectedVersionType ?? null
     };
     const insertedTrack = await supabase.from("tracks").insert(trackRow).select("id").single();
 
@@ -1827,10 +1877,8 @@ export function VocalMapApp({
         return retryTrack.data.id;
       }
 
-      const retrySpotifyTrack = await supabase.from("tracks").select("id").eq("created_by", userId).eq("spotify_track_id", sourceTrackId).maybeSingle();
-      if (!retrySpotifyTrack.error && retrySpotifyTrack.data?.id) {
-        return retrySpotifyTrack.data.id;
-      }
+      const retryVideoTrack = await supabase.from("tracks").select("id").eq("created_by", userId).eq("youtube_video_id", sourceTrackId).maybeSingle();
+      if (!retryVideoTrack.error && retryVideoTrack.data?.id) return retryVideoTrack.data.id;
     }
 
     throw insertedTrack.error ?? new Error("Track insert failed.");
@@ -1857,7 +1905,7 @@ export function VocalMapApp({
     const documentRow: TablesInsert<"lyrics_documents"> = {
       created_by: userId,
       track_id: trackId,
-      provider: song.spotifyTrackId ? "spotify" : "manual",
+      provider: song.youtubeVideoId ? "youtube" : "manual",
       lyrics_text: song.sourceLyricsText,
       lyrics_hash: lyricsHash,
       tokenizer_version: LYRICS_TOKENIZER_VERSION,
@@ -1893,11 +1941,14 @@ export function VocalMapApp({
       lyrics_document_id: lyricsDocumentId,
       title: song.title,
       artist: song.artist ?? null,
-      album_name: song.albumName ?? null,
-      album_art_url: song.albumArtUrl ?? null,
-      spotify_track_id: song.spotifyTrackId ?? null,
-      spotify_url: song.spotifyUrl ?? null,
-      duration_ms: song.durationMs ?? null
+      duration_ms: song.durationMs ?? null,
+      source: song.source,
+      youtube_video_id: song.youtubeVideoId ?? null,
+      video_title: song.videoTitle ?? null,
+      channel_title: song.channelTitle ?? null,
+      thumbnail_url: song.thumbnailUrl ?? null,
+      original_search_query: song.originalSearchQuery ?? null,
+      selected_version_type: song.selectedVersionType ?? null
     };
 
     const { error } = await supabase.from("user_songs").upsert(songRow, { onConflict: "id" });
@@ -1950,7 +2001,7 @@ export function VocalMapApp({
       });
 
       setPendingSongAudioFile(null);
-      setActiveSongId(nextSong.id);
+      activateSong(nextSong.id);
       setEditingSongId(null);
       closeNoteEditor();
       setSelection(null);
@@ -1977,7 +2028,9 @@ export function VocalMapApp({
 
     await deleteStoragePaths(collectAudioPaths(song));
     setSongs((currentSongs) => currentSongs.filter((item) => item.id !== song.id));
-    setActiveSongId((currentId) => (currentId === song.id ? null : currentId));
+    if (effectiveActiveSongId === song.id) {
+      activateSong(null);
+    }
     closeNoteEditor();
     setSelection(null);
     setStatusMessage(t("songDeleted"));
@@ -2150,7 +2203,6 @@ export function VocalMapApp({
         ...song,
         lyrics: song.lyrics.map((line) => ({
           ...line,
-          annotations: line.annotations.filter((annotation) => annotation.markerId !== markerId),
           words: line.words.map((word) => ({
             ...word,
             annotations: word.annotations.filter((annotation) => annotation.markerId !== markerId)
@@ -2188,121 +2240,58 @@ export function VocalMapApp({
     setStatusMessage(t("markerDefaultsReset"));
   }
 
-  async function searchSpotify() {
-    const query = spotifyQuery.trim();
-    if (!query) {
-      setSpotifyMessage(t("queryRequired"));
-      return;
-    }
+  async function importYouTubeVideo(video: YouTubeVideoSearchResult, originalSearchQuery: string) {
+    const isReplacingExistingSong = Boolean(editingSongId && editingSongId !== "new");
+    let lyricsText = draft.lyricsText;
 
-    setIsSearchingSpotify(true);
-    setSpotifyMessage("");
-    setSpotifyResults([]);
-
-    try {
-      const response = await fetch(`/api/spotify/search?q=${encodeURIComponent(query)}`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 501) {
-          const lyricResults = await searchLyricsCatalog(query);
-          setSpotifyResults(
-            lyricResults.map((match) => ({
-              id: `lrclib-${match.id}`,
-              title: match.trackName,
-              artist: match.artistName,
-              albumName: match.albumName ?? "LRCLIB",
-              albumArtUrl: "",
-              durationMs: Math.round((match.duration ?? 0) * 1000),
-              spotifyUrl: "",
-              source: "lrclib",
-              lyricsText: lyricsTextFromMatch(match)
-            }))
-          );
-          setSpotifyMessage(t("spotifyMissing"));
-          return;
-        }
-
-        const errorCode = data.errorCode as SpotifySearchErrorCode | undefined;
-        setSpotifyMessage(t(errorCode ? spotifySearchErrorMessageKeys[errorCode] ?? "spotifySearchFailed" : "spotifySearchFailed"));
-        return;
-      }
-
-      setSpotifyResults((data.tracks ?? []).map((track: SpotifyTrackResult) => ({ ...track, source: "spotify" })));
-      if ((data.tracks ?? []).length === 0) {
-        setSpotifyMessage(t("spotifyNoResults"));
-      }
-    } catch {
+    if (!isReplacingExistingSong) {
+      setStatusMessage(t("findLyrics"));
       try {
-        const lyricResults = await searchLyricsCatalog(query);
-        setSpotifyResults(
-          lyricResults.map((match) => ({
-            id: `lrclib-${match.id}`,
-            title: match.trackName,
-            artist: match.artistName,
-            albumName: match.albumName ?? "LRCLIB",
-            albumArtUrl: "",
-            durationMs: Math.round((match.duration ?? 0) * 1000),
-            spotifyUrl: "",
-            source: "lrclib",
-            lyricsText: lyricsTextFromMatch(match)
-          }))
-        );
-        setSpotifyMessage(t("spotifyUnavailable"));
-      } catch {
-        setSpotifyMessage(t("spotifySearchUnavailable"));
-      }
-    } finally {
-      setIsSearchingSpotify(false);
-    }
-  }
-
-  async function importSpotifyTrack(track: SpotifyTrackResult) {
-    setImportingTrackId(track.id);
-    setSpotifyMessage(track.source === "lrclib" ? t("openLyricsFromLrclib") : t("findLyrics"));
-
-    let lyricsText = track.lyricsText ?? "";
-    try {
-      if (!lyricsText) {
         const match = await findLyricsForTrack({
-          title: track.title,
-          artist: track.artist,
-          albumName: track.albumName,
-          durationMs: track.durationMs
+          title: video.title,
+          artist: video.artistName,
+          durationMs: video.durationMs
         });
-
         if (match?.plainLyrics) {
           lyricsText = match.plainLyrics;
-          setSpotifyMessage(t("lyricsFound"));
+          setStatusMessage(t("lyricsFound"));
         } else if (match?.syncedLyrics) {
           lyricsText = syncedLyricsToPlainText(match.syncedLyrics);
-          setSpotifyMessage(t("syncedLyricsFound"));
+          setStatusMessage(t("syncedLyricsFound"));
         } else {
-          setSpotifyMessage(t("lyricsNotFound"));
+          setStatusMessage(t("lyricsNotFound"));
         }
-      } else {
-        setSpotifyMessage(t("lyricsFound"));
+      } catch {
+        setStatusMessage(t("lyricsFetchFailed"));
       }
-    } catch {
-      setSpotifyMessage(t("lyricsFetchFailed"));
     }
 
-    setDraft({
-      title: track.title,
-      artist: track.artist,
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      title: isReplacingExistingSong ? currentDraft.title : video.title,
+      artist: isReplacingExistingSong ? currentDraft.artist : video.artistName,
       lyricsText,
-      albumName: track.albumName,
-      albumArtUrl: track.albumArtUrl,
-      spotifyTrackId: track.source === "spotify" ? track.id : undefined,
-      spotifyUrl: track.spotifyUrl,
-      durationMs: track.durationMs
-    });
-    setEditingSongId("new");
-    setPreferredAudioProvider(track.source === "spotify" ? "spotify" : "file");
-    setActiveSongId(null);
+      youtubeVideoId: video.youtubeVideoId,
+      videoTitle: video.title,
+      channelTitle: video.channelTitle,
+      thumbnailUrl: video.thumbnailUrl,
+      originalSearchQuery,
+      selectedVersionType: video.versionType,
+      durationMs: video.durationMs
+    }));
+    setPreferredAudioProvider("youtube");
     closeNoteEditor();
     setSelection(null);
-    setImportingTrackId(null);
+  }
+
+  function handleYouTubePlayerError(errorCode: YouTubePlayerErrorCode) {
+    const messageKey: Record<YouTubePlayerErrorCode, "youtubeInvalidVideo" | "youtubeVideoUnavailable" | "youtubeEmbeddingRestricted" | "youtubePlayerLoadFailed"> = {
+      invalidVideo: "youtubeInvalidVideo",
+      videoUnavailable: "youtubeVideoUnavailable",
+      embeddingRestricted: "youtubeEmbeddingRestricted",
+      playerLoadFailed: "youtubePlayerLoadFailed"
+    };
+    setStatusMessage(t(messageKey[errorCode]));
   }
 
   function beginWordSelection(event: React.PointerEvent<HTMLElement>, lineId: string, wordId: string) {
@@ -2409,15 +2398,17 @@ export function VocalMapApp({
   function updateSelectedTarget(
     target: SelectedTarget,
     updater: (payload: {
-      annotations: Array<LineAnnotation | WordAnnotation>;
+      annotations: WordAnnotation[];
       audioReference?: AudioReference;
       textNote?: TextNote;
+      timestampMs?: number;
     }) => {
-      annotations?: Array<LineAnnotation | WordAnnotation>;
+      annotations?: WordAnnotation[];
       audioReference?: AudioReference;
       removeAudio?: boolean;
       textNote?: TextNote;
       removeTextNote?: boolean;
+      timestampMs?: number;
     }
   ) {
     const now = new Date().toISOString();
@@ -2433,21 +2424,6 @@ export function VocalMapApp({
             return line;
           }
 
-          if (target.type === "line") {
-            const result = updater({
-              annotations: line.annotations,
-              audioReference: line.audioReference,
-              textNote: line.textNote
-            });
-
-            return {
-              ...line,
-              annotations: (result.annotations as LineAnnotation[] | undefined) ?? line.annotations,
-              audioReference: result.removeAudio ? undefined : result.audioReference ?? line.audioReference,
-              textNote: result.removeTextNote ? undefined : result.textNote ?? line.textNote
-            };
-          }
-
           return {
             ...line,
             words: line.words.map((word) => {
@@ -2458,14 +2434,16 @@ export function VocalMapApp({
               const result = updater({
                 annotations: word.annotations,
                 audioReference: word.audioReference,
-                textNote: word.textNote
+                textNote: word.textNote,
+                timestampMs: word.timestampMs
               });
 
               return {
                 ...word,
-                annotations: (result.annotations as WordAnnotation[] | undefined) ?? word.annotations,
+                annotations: result.annotations ?? word.annotations,
                 audioReference: result.removeAudio ? undefined : result.audioReference ?? word.audioReference,
-                textNote: result.removeTextNote ? undefined : result.textNote ?? word.textNote
+                textNote: result.removeTextNote ? undefined : result.textNote ?? word.textNote,
+                timestampMs: result.timestampMs ?? word.timestampMs
               };
             })
           };
@@ -2489,10 +2467,12 @@ export function VocalMapApp({
       wordIndex: number;
       annotations: WordAnnotation[];
       textNote?: TextNote;
+      timestampMs?: number;
     }) => {
       annotations?: WordAnnotation[];
       textNote?: TextNote;
       removeTextNote?: boolean;
+      timestampMs?: number;
     }
   ) {
     const now = new Date().toISOString();
@@ -2524,13 +2504,15 @@ export function VocalMapApp({
                 lineIndex: selectedAddress.lineIndex,
                 wordIndex: selectedAddress.wordIndex,
                 annotations: word.annotations,
-                textNote: word.textNote
+                textNote: word.textNote,
+                timestampMs: word.timestampMs
               });
 
               return {
                 ...word,
                 annotations: result.annotations ?? word.annotations,
-                textNote: result.removeTextNote ? undefined : result.textNote ?? word.textNote
+                textNote: result.removeTextNote ? undefined : result.textNote ?? word.textNote,
+                timestampMs: result.timestampMs ?? word.timestampMs
               };
             })
           })),
@@ -2564,6 +2546,56 @@ export function VocalMapApp({
     }
 
     return Boolean(selectedData.textNote);
+  }
+
+  function seekToTimestamp(timestampMs: number) {
+    setPlayerSeekRequest({ id: Date.now(), timeMs: timestampMs });
+    setPreferredAudioProvider("youtube");
+  }
+
+  async function syncSelectionToPlayer() {
+    if (!selection || !activeSong) {
+      return;
+    }
+
+    const targets = selectedWordAddresses(activeSong, selection);
+    if (targets.length === 0) {
+      return;
+    }
+
+    const timestampMs = Math.max(0, Math.round(playerTimeMs));
+    const rows: TablesInsert<"lyric_timestamps">[] = targets.map((target) => ({
+      user_id: userId,
+      user_song_id: activeSong.id,
+      line_index: target.lineIndex,
+      word_index: target.wordIndex,
+      timestamp_ms: timestampMs
+    }));
+    const { error } = await supabase.from("lyric_timestamps").upsert(rows, {
+      onConflict: "user_id,user_song_id,line_index,word_index"
+    });
+    if (error) {
+      setStatusMessage(t("syncSaveFailed"));
+      return;
+    }
+
+    if (selection.type === "range") {
+      updateSelectedRangeTarget(selection, () => ({ timestampMs }));
+    } else {
+      updateSelectedTarget(selection, () => ({ timestampMs }));
+    }
+    setStatusMessage(t("syncSaved", { time: formatDuration(timestampMs) }));
+  }
+
+  function seekToSelectedTimestamp() {
+    if (!selection || !activeSong) {
+      return;
+    }
+
+    const timestampMs = selectedWordAddresses(activeSong, selection).find((target) => typeof target.word.timestampMs === "number")?.word.timestampMs;
+    if (typeof timestampMs === "number") {
+      seekToTimestamp(timestampMs);
+    }
   }
 
   function openNoteEditor() {
@@ -2842,11 +2874,7 @@ export function VocalMapApp({
     }
 
     const targetId =
-      target.type === "song"
-        ? target.songId
-        : targetCoordinates?.wordIndex === null
-          ? `line-${targetCoordinates.lineIndex}`
-          : `word-${targetCoordinates?.lineIndex}-${targetCoordinates?.wordIndex}`;
+      target.type === "song" ? target.songId : `word-${targetCoordinates!.lineIndex}-${targetCoordinates!.wordIndex}`;
     const storagePath = `${userId}/${target.songId}/${target.type}-${targetId}/${audioId}.${extensionFromMime(mimeType)}`;
     const { error: uploadError } = await supabase.storage.from(AUDIO_BUCKET).upload(storagePath, blob, {
       contentType: mimeType,
@@ -2858,7 +2886,7 @@ export function VocalMapApp({
     }
 
     const audioReference = makeAudioReference(storagePath, blob, normalizedLabel, audioId);
-    const existingSelectedData = target.type === "song" ? null : findSelectedData(songs.find((song) => song.id === target.songId), target, common("emptyLine"));
+    const existingSelectedData = target.type === "song" ? null : findSelectedData(songs.find((song) => song.id === target.songId), target);
     const existingAudio = target.type === "song" ? undefined : existingSelectedData?.type === "range" ? undefined : existingSelectedData?.audioReference;
 
     if (existingAudio) {
@@ -3093,7 +3121,7 @@ export function VocalMapApp({
               aria-label={t("expandLibrary")}
               title={t("expandLibrary")}
             >
-              <Image className="h-auto w-full" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
+              <Image className="h-auto w-full" src="/images/vocalmapp-sidebar-logo.svg" alt={common("appName")} width={286} height={36} priority />
             </button>
             <div className="flex items-center gap-2 lg:w-10 lg:flex-col lg:items-center">
               <button
@@ -3139,7 +3167,7 @@ export function VocalMapApp({
           <>
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Image className="h-auto w-32 flex-none" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
+            <Image className="h-auto w-44 flex-none" src="/images/vocalmapp-sidebar-logo.svg" alt={common("appName")} width={286} height={36} priority />
           </div>
           <div className="flex flex-none items-center gap-2">
               <button
@@ -3201,7 +3229,7 @@ export function VocalMapApp({
               noArtist: common("noArtist"),
               lines: t("linesCount", { count: activeSong.lyrics.length }),
               markers: t("markersCount", { count: countMarkedTargets(activeSong) }),
-              spotify: common("spotify"),
+              youtube: common("youtube"),
               workspaceHint: t("workspaceHint"),
               edit: common("edit"),
               delete: common("delete"),
@@ -3258,7 +3286,7 @@ export function VocalMapApp({
                   className="grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-2 px-2 py-1.5 text-left"
                   type="button"
                   onClick={() => {
-                    setActiveSongId(song.id);
+                    activateSong(song.id);
                     setEditingSongId(null);
                     setIsMobileLibraryOpen(false);
                     closeNoteEditor();
@@ -3266,8 +3294,8 @@ export function VocalMapApp({
                     setSelection(null);
                   }}
                 >
-                  {song.albumArtUrl ? (
-                    <Image className="rounded object-cover" src={song.albumArtUrl} alt={t("coverAlt", { title: song.title })} width={28} height={28} />
+                  {song.thumbnailUrl ? (
+                    <Image className="rounded object-cover" src={song.thumbnailUrl} alt={t("coverAlt", { title: song.title })} width={28} height={28} />
                   ) : (
                     <FileText className="text-stone-500" size={17} />
                   )}
@@ -3402,63 +3430,26 @@ export function VocalMapApp({
               </div>
             </div>
 
-            {editingSongId === "new" ? (
-              <section className="mb-4 grid gap-3 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
-                      <span className="grid size-5 place-items-center rounded-full bg-emerald-600 text-[11px] leading-none text-white">1</span>
-                      {t("songFlowSearchTitle")}
-                    </p>
-                    <p className="mt-1 text-sm leading-5 text-stone-600">{t("songFlowSearchBody")}</p>
-                  </div>
-                  {spotifyResults.length > 0 ? <p className="text-xs font-bold text-emerald-700">{t("searchResultsCount", { count: spotifyResults.length })}</p> : null}
-                </div>
-                <form
-                  className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void searchSpotify();
-                  }}
-                >
-                  <input className={inputClass} value={spotifyQuery} onChange={(event) => setSpotifyQuery(event.target.value)} placeholder={t("musicSearchPlaceholder")} />
-                  <button className={`${secondaryButtonClass} min-h-11 px-4`} type="submit" disabled={isSearchingSpotify}>
-                    {isSearchingSpotify ? <Loader2 className="spin size-4" /> : <Search size={16} />}
-                    {common("search")}
-                  </button>
-                </form>
-                {spotifyMessage ? <p className="text-sm leading-5 text-stone-600">{spotifyMessage}</p> : null}
-                {spotifyResults.length > 0 ? (
-                  <div className="grid max-h-60 gap-2 overflow-auto pr-1 sm:grid-cols-2">
-                    {spotifyResults.map((track) => (
-                      <button
-                        className="grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-white/80 bg-white/85 p-2 text-left transition hover:border-emerald-200 hover:bg-white"
-                        type="button"
-                        key={track.id}
-                        onClick={() => void importSpotifyTrack(track)}
-                      >
-                        {track.albumArtUrl ? (
-                          <Image className="size-11 rounded-lg object-cover" src={track.albumArtUrl} alt={t("coverAlt", { title: track.title })} width={44} height={44} />
-                        ) : (
-                          <div className="grid size-11 place-items-center rounded-lg bg-emerald-100 text-emerald-700">
-                            <Music2 size={17} />
-                          </div>
-                        )}
-                        <span className="min-w-0">
-                          <strong className="block truncate text-sm font-semibold text-stone-950">{track.title}</strong>
-                          <small className="block truncate text-xs text-stone-500">
-                            {track.artist} · {formatDuration(track.durationMs)}
-                            {track.source === "lrclib" ? " · LRCLIB" : ""}
-                          </small>
-                        </span>
-                        {importingTrackId === track.id ? <Loader2 className="spin size-4" /> : <Plus size={15} />}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <p className="text-xs leading-5 text-stone-500">{t("songFlowManualFallback")}</p>
-              </section>
-            ) : null}
+            <div className="mb-4">
+              <SongSearch
+                onSelect={importYouTubeVideo}
+                labels={{
+                  placeholder: t("musicSearchPlaceholder"),
+                  search: common("search"),
+                  queryRequired: t("queryRequired"),
+                  noResults: t("youtubeNoResults"),
+                  authRequired: t("youtubeAuthRequired"),
+                  queryTooLong: t("youtubeQueryTooLong"),
+                  rateLimited: t("youtubeRateLimited"),
+                  missingApiKey: t("youtubeMissingApiKey"),
+                  invalidApiKey: t("youtubeInvalidApiKey"),
+                  quotaExceeded: t("youtubeQuotaExceeded"),
+                  searchFailed: t("youtubeSearchFailed"),
+                  unavailable: t("youtubeUnavailable"),
+                  resultCount: (count) => t("searchResultsCount", { count })
+                }}
+              />
+            </div>
 
             <section className="grid gap-4 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4">
               <div>
@@ -3480,18 +3471,17 @@ export function VocalMapApp({
                 </label>
               </div>
 
-              {draft.albumArtUrl || draft.spotifyUrl ? (
+              {songDraftHasImportedDetails ? (
                 <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
-                  {draft.albumArtUrl ? <Image className="rounded-md object-cover" src={draft.albumArtUrl} alt={draft.title ? t("coverAlt", { title: draft.title }) : t("importedCoverAlt")} width={54} height={54} /> : null}
+                  {draft.thumbnailUrl ? <Image className="rounded-md object-cover" src={draft.thumbnailUrl} alt={draft.title ? t("coverAlt", { title: draft.title }) : t("importedCoverAlt")} width={96} height={54} /> : null}
                   <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase text-stone-500">{t("importedFromSpotify")}</p>
+                    <p className="text-xs font-bold uppercase text-stone-500">{t("importedFromYouTube")}</p>
                     <p className="mt-1 text-sm text-stone-600">
-                      {draft.albumName ? `${draft.albumName} · ` : ""}
-                      {formatDuration(draft.durationMs)}
+                      {draft.channelTitle ?? ""} · {formatDuration(draft.durationMs)}
                     </p>
-                    {draft.spotifyUrl ? (
-                      <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700" href={draft.spotifyUrl} target="_blank" rel="noreferrer">
-                        {common("openInSpotify")} <ExternalLink size={13} />
+                    {draft.youtubeVideoId ? (
+                      <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700" href={`https://www.youtube.com/watch?v=${encodeURIComponent(draft.youtubeVideoId)}`} target="_blank" rel="noreferrer">
+                        {common("openOnYouTube")} <ExternalLink size={13} />
                       </a>
                     ) : null}
                   </div>
@@ -3530,14 +3520,14 @@ export function VocalMapApp({
                     onChange={(event) => setPendingSongAudioFile(event.target.files?.[0] ?? null)}
                   />
                 </label>
-                {draft.spotifyUrl ? (
-                  <a className={`${secondaryButtonClass} min-h-11`} href={draft.spotifyUrl} target="_blank" rel="noreferrer">
+                {draft.youtubeVideoId ? (
+                  <a className={`${secondaryButtonClass} min-h-11`} href={`https://www.youtube.com/watch?v=${encodeURIComponent(draft.youtubeVideoId)}`} target="_blank" rel="noreferrer">
                     <ExternalLink size={16} />
-                    {common("openInSpotify")}
+                    {common("openOnYouTube")}
                   </a>
                 ) : (
                   <p className="flex min-h-11 items-center rounded-xl border border-stone-200 bg-stone-50 px-3 text-sm leading-5 text-stone-500">
-                    {songDraftHasImportedDetails ? t("spotifyUnavailableForDraft") : t("spotifyAppearsAfterSearch")}
+                    {t("youtubeSelectionRequired")}
                   </p>
                 )}
               </div>
@@ -3574,6 +3564,7 @@ export function VocalMapApp({
                     onWordPointerUp={finishWordSelection}
                     onWordPointerCancel={cancelWordSelection}
                     onWordKeyboardSelect={selectWordFromKeyboard}
+                    onSeekToTimestamp={seekToTimestamp}
                     onPlayAudio={(audioReference) => void playAudioReference(audioReference)}
                     markerById={markerById}
                     selectedWordIds={selectedWordIds}
@@ -3605,7 +3596,7 @@ export function VocalMapApp({
       </section>
 
       {activeSong && !editingSongId ? (
-        <AudioProviderDock
+        <SongPlayerDock
           song={activeSong}
           provider={activeAudioProvider}
           selectedAudioId={selectedSongAudioId}
@@ -3613,10 +3604,13 @@ export function VocalMapApp({
           onSelectedAudioChange={setSelectedSongAudioId}
           onUpload={(song, file, label) => void uploadSongAudio(song, file, label)}
           onRemove={(song, audioReference) => void removeSongAudio(song, audioReference)}
+          seekRequest={playerSeekRequest}
+          onTimeUpdate={setPlayerTimeMs}
+          onPlayerError={handleYouTubePlayerError}
           supabase={supabase}
           labels={{
             nowPlaying: t("audioDockNowPlaying"),
-            spotify: common("spotify"),
+            youtube: common("youtube"),
             file: t("audioDockFile"),
             fileSelect: t("audioDockFileSelect"),
             noFile: t("audioDockNoFile"),
@@ -3635,7 +3629,8 @@ export function VocalMapApp({
             noAudioFile: t("noAudioFile"),
             cancel: common("cancel"),
             close: common("close"),
-            spotifyTitle: t("spotifyPlayerTitle", { title: activeSong.title }),
+            youtubeTitle: t("youtubePlayerTitle", { title: activeSong.title }),
+            audioNotice: t("youtubeAudioNotice"),
             expand: t("expandPlayer"),
             collapse: t("collapsePlayer")
           }}
@@ -4020,11 +4015,11 @@ export function VocalMapApp({
           data-marker-popover="true"
           style={popoverStyle}
           role="dialog"
-          aria-label={selectedData.type === "line" ? t("selectedLine") : selectedData.type === "range" ? t("selectedRange") : t("selectedWord")}
+          aria-label={selectedData.type === "range" ? t("selectedRange") : t("selectedWord")}
         >
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-bold uppercase text-stone-500">{selectedData.type === "line" ? t("selectedLine") : selectedData.type === "range" ? t("selectedRange") : t("selectedWord")}</p>
+              <p className="text-xs font-bold uppercase text-stone-500">{selectedData.type === "range" ? t("selectedRange") : t("selectedWord")}</p>
               <strong className="block truncate text-sm leading-6 text-stone-950" title={selectedData.label}>
                 {selectedData.type === "range" ? t("selectedRangeCount", { count: selectedData.wordTargets.length }) : selectedData.label}
               </strong>
@@ -4100,6 +4095,15 @@ export function VocalMapApp({
                 ) : null}
               </>
             ) : null}
+
+            <button className={secondaryButtonClass} type="button" onClick={() => void syncSelectionToPlayer()} disabled={!activeSong?.youtubeVideoId}>
+              <Music2 size={15} />
+              {t("syncToPlayer", { time: formatDuration(playerTimeMs) })}
+            </button>
+            <button className={secondaryButtonClass} type="button" onClick={seekToSelectedTimestamp} disabled={!activeSong?.youtubeVideoId}>
+              <Play size={15} fill="currentColor" />
+              {t("seekToSync")}
+            </button>
 
             <button className={secondaryButtonClass} type="button" onClick={openNoteEditor}>
               <StickyNote size={15} />

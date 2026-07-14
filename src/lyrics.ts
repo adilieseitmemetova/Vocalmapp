@@ -33,6 +33,7 @@ export function buildLyrics(text: string, existingLines: LyricLine[] = [], songI
       return {
         id: songId ? makeLyricWordId(songId, lineIndex, wordIndex) : previousWordMatches ? previousWord.id : makeId(),
         text: wordText,
+        timestampMs: previousWordMatches ? previousWord.timestampMs : undefined,
         annotations: previousWordMatches ? previousWord.annotations : [],
         audioReference: previousWordMatches ? previousWord.audioReference : undefined,
         textNote: previousWordMatches ? previousWord.textNote : undefined
@@ -42,10 +43,7 @@ export function buildLyrics(text: string, existingLines: LyricLine[] = [], songI
     return {
       id: songId ? makeLyricLineId(songId, lineIndex) : previousLineMatches ? previousLine.id : makeId(),
       text: lineText,
-      words,
-      annotations: previousLineMatches ? previousLine.annotations : [],
-      audioReference: previousLineMatches ? previousLine.audioReference : undefined,
-      textNote: previousLineMatches ? previousLine.textNote : undefined
+      words
     };
   });
 }

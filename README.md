@@ -11,6 +11,8 @@ vocalmapp is a private Next.js App Router application for vocalists who mark up 
 - next-intl with English as the default locale
 - Supabase Auth, Database, Row Level Security, and Storage
 - Supabase email one-time code authentication
+- YouTube Data API v3 for server-side song search
+- Official YouTube IFrame Player API for in-app playback
 
 ## Environment
 
@@ -19,11 +21,12 @@ Create `.env.local` from `.env.example` and set:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=
+YOUTUBE_API_KEY=
 ```
 
-`SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are optional. When they are missing, the search UI falls back to LRCLIB results.
+`YOUTUBE_API_KEY` is server-only. Enable YouTube Data API v3 for the key and do not expose it with a `NEXT_PUBLIC_` prefix. Search is authenticated, validates queries, limits requests per user, and does not log API keys.
+
+Audio is played through the official YouTube player. vocalmapp does not host, proxy, extract, or download copyrighted audio.
 
 Do not expose `SUPABASE_SERVICE_ROLE_KEY` to client code. The application uses the public Supabase anon key with RLS for browser access.
 
@@ -40,6 +43,7 @@ Created public tables:
 - `markers`
 - `annotations`
 - `audio_references`
+- `lyric_timestamps`
 
 Created storage bucket:
 
@@ -77,6 +81,7 @@ http://127.0.0.1:3000
 ## Verification
 
 ```bash
+npm run test
 npm run typecheck
 npm run lint
 npm run build

@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildLyrics } from "@/lyrics";
 import { DEFAULT_MARKERS } from "@/markers";
 import type { Database, Tables } from "@/lib/database.types";
-import type { AudioReference, InitialVocalMapData, LineAnnotation, LyricLine, Marker, MarkerIconName, Song, TextNote, WordAnnotation } from "@/types";
+import type { AudioReference, InitialVocalMapData, LyricLine, Marker, MarkerIconName, Song, TextNote, WordAnnotation, YouTubeVersionType } from "@/types";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 type UserSongRow = Tables<"user_songs">;
@@ -12,6 +12,7 @@ type AnnotationRow = Tables<"annotations">;
 type AudioRow = Tables<"audio_references">;
 type TextNoteRow = Tables<"target_notes">;
 type MarkerRow = Tables<"markers">;
+type LyricTimestampRow = Tables<"lyric_timestamps">;
 
 const markerIcons = new Set<MarkerIconName>([
   "up",
@@ -74,6 +75,11 @@ const markerIcons = new Set<MarkerIconName>([
   "tally-2",
   "tally-3"
 ]);
+const youTubeVersionTypes = new Set<YouTubeVersionType>(["official-video", "official-audio", "lyric-video", "live", "acoustic", "karaoke", "cover", "other"]);
+
+function toYouTubeVersionType(value: string | null): YouTubeVersionType | undefined {
+  return value && youTubeVersionTypes.has(value as YouTubeVersionType) ? (value as YouTubeVersionType) : undefined;
+}
 
 function requireData<T>(result: { data: T | null; error: { message: string } | null }) {
   if (result.error) {
@@ -81,6 +87,24 @@ function requireData<T>(result: { data: T | null; error: { message: string } | n
   }
 
   return result.data ?? ([] as T);
+}
+
+function requireOptionalTableData<T>(result: { data: T | null; error: { code?: string; message: string } | null }, tableName: string) {
+  if (!result.error) {
+    return result.data ?? ([] as T);
+  }
+
+  // During a rolling deploy the app code can arrive before its migration. Keep
+  // the dashboard usable until the optional timestamp table is available, but
+  // continue surfacing every other data error.
+  if (
+    result.error.code === "PGRST205" &&
+    result.error.message.includes(`public.${tableName}`)
+  ) {
+    return [] as T;
+  }
+
+  throw new Error(result.error.message);
 }
 
 function toMarker(row: MarkerRow): Marker {
@@ -139,12 +163,13 @@ async function getLyricsDocumentsById(supabase: AppSupabaseClient, documentIds: 
 }
 
 export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId: string): Promise<InitialVocalMapData> {
-  const [songsResult, annotationsResult, audioResult, notesResult, markersResult] = await Promise.all([
+  const [songsResult, annotationsResult, audioResult, notesResult, markersResult, timestampsResult] = await Promise.all([
     supabase.from("user_songs").select("*").eq("user_id", userId).order("updated_at", { ascending: false }),
-    supabase.from("annotations").select("*").eq("user_id", userId),
-    supabase.from("audio_references").select("*").eq("user_id", userId).order("created_at", { ascending: true }),
-    supabase.from("target_notes").select("*").eq("user_id", userId),
-    supabase.from("markers").select("*").order("sort_order", { ascending: true })
+    supabase.from("annotations").select("*").eq("user_id", userId).eq("target_type", "word"),
+    supabase.from("audio_references").select("*").eq("user_id", userId).neq("target_type", "line").order("created_at", { ascending: true }),
+    supabase.from("target_notes").select("*").eq("user_id", userId).eq("target_type", "word"),
+    supabase.from("markers").select("*").order("sort_order", { ascending: true }),
+    supabase.from("lyric_timestamps").select("*").eq("user_id", userId)
   ]);
 
   const userSongRows = requireData<UserSongRow[]>(songsResult);
@@ -152,22 +177,14 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
   const audioRows = requireData<AudioRow[]>(audioResult);
   const noteRows = requireData<TextNoteRow[]>(notesResult);
   const markerRows = requireData<MarkerRow[]>(markersResult);
+  const timestampRows = requireOptionalTableData<LyricTimestampRow[]>(timestampsResult, "lyric_timestamps");
   const lyricsDocumentsById = await getLyricsDocumentsById(
     supabase,
     userSongRows.map((song) => song.lyrics_document_id)
   );
 
-  const annotationsByLine = new Map<string, LineAnnotation[]>();
   const annotationsByWord = new Map<string, WordAnnotation[]>();
   for (const annotation of annotationRows) {
-    if (annotation.target_type === "line") {
-      addToMapList(annotationsByLine, targetKey(annotation.user_song_id, annotation.line_index, null), {
-        id: annotation.id,
-        markerId: annotation.marker_id,
-        note: annotation.note ?? undefined
-      });
-    }
-
     if (annotation.target_type === "word" && annotation.word_index !== null) {
       addToMapList(annotationsByWord, targetKey(annotation.user_song_id, annotation.line_index, annotation.word_index), {
         id: annotation.id,
@@ -178,26 +195,25 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
   }
 
   const audioBySong = new Map<string, AudioReference[]>();
-  const audioByLine = new Map<string, AudioReference>();
   const audioByWord = new Map<string, AudioReference>();
   for (const audio of audioRows) {
     if (audio.target_type === "song") {
       addToMapList(audioBySong, audio.user_song_id, toAudioReference(audio));
-    } else if (audio.target_type === "line" && audio.line_index !== null) {
-      audioByLine.set(targetKey(audio.user_song_id, audio.line_index, null), toAudioReference(audio));
     } else if (audio.target_type === "word" && audio.line_index !== null && audio.word_index !== null) {
       audioByWord.set(targetKey(audio.user_song_id, audio.line_index, audio.word_index), toAudioReference(audio));
     }
   }
 
-  const notesByLine = new Map<string, TextNote>();
   const notesByWord = new Map<string, TextNote>();
   for (const note of noteRows) {
-    if (note.target_type === "line") {
-      notesByLine.set(targetKey(note.user_song_id, note.line_index, null), toTextNote(note));
-    } else if (note.target_type === "word" && note.word_index !== null) {
+    if (note.target_type === "word" && note.word_index !== null) {
       notesByWord.set(targetKey(note.user_song_id, note.line_index, note.word_index), toTextNote(note));
     }
+  }
+
+  const timestampsByWord = new Map<string, number>();
+  for (const timestamp of timestampRows) {
+    timestampsByWord.set(targetKey(timestamp.user_song_id, timestamp.line_index, timestamp.word_index), timestamp.timestamp_ms);
   }
 
   const songs: Song[] = userSongRows.map((song) => {
@@ -205,11 +221,9 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
     const sourceLyricsText = lyricsDocument?.lyrics_text ?? "";
     const lyrics: LyricLine[] = buildLyrics(sourceLyricsText, [], song.id).map((line, lineIndex) => ({
       ...line,
-      annotations: annotationsByLine.get(targetKey(song.id, lineIndex, null)) ?? [],
-      audioReference: audioByLine.get(targetKey(song.id, lineIndex, null)),
-      textNote: notesByLine.get(targetKey(song.id, lineIndex, null)),
       words: line.words.map((word, wordIndex) => ({
         ...word,
+        timestampMs: timestampsByWord.get(targetKey(song.id, lineIndex, wordIndex)),
         annotations: annotationsByWord.get(targetKey(song.id, lineIndex, wordIndex)) ?? [],
         audioReference: audioByWord.get(targetKey(song.id, lineIndex, wordIndex)),
         textNote: notesByWord.get(targetKey(song.id, lineIndex, wordIndex))
@@ -222,10 +236,13 @@ export async function getInitialVocalMapData(supabase: AppSupabaseClient, userId
       lyricsDocumentId: song.lyrics_document_id,
       title: song.title,
       artist: song.artist ?? undefined,
-      albumName: song.album_name ?? undefined,
-      albumArtUrl: song.album_art_url ?? undefined,
-      spotifyTrackId: song.spotify_track_id ?? undefined,
-      spotifyUrl: song.spotify_url ?? undefined,
+      youtubeVideoId: song.youtube_video_id ?? undefined,
+      videoTitle: song.video_title ?? undefined,
+      channelTitle: song.channel_title ?? undefined,
+      thumbnailUrl: song.thumbnail_url ?? undefined,
+      originalSearchQuery: song.original_search_query ?? undefined,
+      selectedVersionType: toYouTubeVersionType(song.selected_version_type),
+      source: song.source === "youtube" ? "youtube" : song.source === "manual" ? "manual" : "legacy",
       lyrics,
       sourceLyricsText,
       songAudios: audioBySong.get(song.id) ?? [],

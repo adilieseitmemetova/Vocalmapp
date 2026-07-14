@@ -80,6 +80,62 @@ button:disabled {
   animation: spin 900ms linear infinite;
 }
 
+.app-loading-screen {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  overflow: hidden;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 15% 12%, rgba(117, 213, 188, 0.5), transparent 28rem),
+    radial-gradient(circle at 84% 88%, rgba(192, 216, 176, 0.4), transparent 30rem),
+    #f8faf7;
+}
+
+.app-loading-card {
+  display: grid;
+  width: min(100%, 25rem);
+  justify-items: center;
+  gap: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 1.75rem;
+  background: rgba(255, 254, 249, 0.9);
+  padding: 2.5rem 2rem;
+  box-shadow: 0 28px 70px rgba(24, 73, 58, 0.14), inset 0 1px rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(18px) saturate(1.08);
+  animation: vm-loading-card-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.app-loading-wave {
+  display: flex;
+  height: 2rem;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.app-loading-wave span {
+  display: block;
+  width: 0.3rem;
+  height: 0.65rem;
+  border-radius: 9999px;
+  background: #059669;
+  animation: vm-loading-wave 800ms ease-in-out infinite alternate;
+}
+
+.app-loading-wave span:nth-child(2) { animation-delay: 80ms; }
+.app-loading-wave span:nth-child(3) { animation-delay: 160ms; }
+.app-loading-wave span:nth-child(4) { animation-delay: 240ms; }
+.app-loading-wave span:nth-child(5) { animation-delay: 320ms; }
+
+@keyframes vm-loading-card-in {
+  from { opacity: 0; transform: translateY(0.5rem) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes vm-loading-wave {
+  to { height: 1.75rem; opacity: 0.6; }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

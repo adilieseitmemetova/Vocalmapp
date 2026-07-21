@@ -2,6 +2,31 @@ import type { LyricLine, LyricsMatch } from "./types";
 
 export const LYRICS_TOKENIZER_VERSION = "whitespace-v1";
 
+const NON_ARTIST_WORDS = new Set([
+  "acoustic",
+  "audio",
+  "cover",
+  "feat",
+  "featuring",
+  "hd",
+  "hq",
+  "instrumental",
+  "karaoke",
+  "live",
+  "lyric",
+  "lyrics",
+  "music",
+  "official",
+  "performance",
+  "remix",
+  "video",
+  "version",
+  "visualizer"
+]);
+
+const ALTERNATE_VERSION_PATTERN = /\b(?:acoustic|cover|instrumental|karaoke|live|remix)\b/i;
+const VIDEO_TITLE_METADATA_PATTERN = /\s*[\[(](?=[^\])]*\b(?:acoustic|audio|cover|karaoke|live|lyric|lyrics|music|official|remix|video|visualizer)\b)[^\])]*[\])]/giu;
+
 function makeId() {
   return crypto.randomUUID();
 }
@@ -73,25 +98,94 @@ export function lyricsTextFromMatch(match: LyricsMatch) {
 }
 
 function normalize(value: string | undefined | null) {
-  return (value ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
-function scoreLyricsMatch(match: LyricsMatch, title: string, artist: string, durationMs?: number) {
-  let score = 0;
-  const titleNorm = normalize(title);
-  const artistNorm = normalize(artist);
-  const matchTitle = normalize(match.trackName);
-  const matchArtist = normalize(match.artistName);
+export function getLyricsSearchTitleCandidates(searchQuery: string, videoTitle: string) {
+  const candidates = [
+    searchQuery,
+    ...videoTitle
+      .replace(VIDEO_TITLE_METADATA_PATTERN, "")
+      .split(/\s[-–—]\s/)
+  ];
+  const seen = new Set<string>();
 
-  if (matchTitle === titleNorm) {
-    score += 30;
-  } else if (matchTitle.includes(titleNorm) || titleNorm.includes(matchTitle)) {
-    score += 12;
+  return candidates.filter((candidate) => {
+    const normalizedCandidate = normalize(candidate);
+    if (!normalizedCandidate || seen.has(normalizedCandidate)) {
+      return false;
+    }
+
+    seen.add(normalizedCandidate);
+    return true;
+  });
+}
+
+function significantWords(value: string) {
+  return new Set(
+    normalize(value)
+      .split(" ")
+      .filter((word) => word.length > 1 && !NON_ARTIST_WORDS.has(word))
+  );
+}
+
+function scoreArtistHint(matchArtist: string, referenceTitle: string | undefined, searchTitle: string) {
+  if (!referenceTitle) {
+    return 0;
   }
 
-  if (artistNorm && matchArtist.includes(artistNorm.split(" ")[0])) {
-    score += 18;
+  const titleWords = significantWords(searchTitle);
+  const referenceWords = significantWords(referenceTitle);
+  const hintWords = new Set([...referenceWords].filter((word) => !titleWords.has(word)));
+  const artistWords = significantWords(matchArtist);
+
+  if (hintWords.size === 0 || artistWords.size === 0) {
+    return 0;
   }
+
+  const matchingWords = [...artistWords].filter((word) => hintWords.has(word)).length;
+  if (matchingWords === artistWords.size) {
+    return 75;
+  }
+
+  return matchingWords * 15;
+}
+
+function scoreTitleMatch(matchTitle: string, searchTitle: string) {
+  const normalizedMatchTitle = normalize(matchTitle);
+  const normalizedSearchTitle = normalize(searchTitle);
+
+  if (!normalizedMatchTitle || !normalizedSearchTitle) {
+    return 0;
+  }
+
+  if (normalizedMatchTitle === normalizedSearchTitle) {
+    return 100;
+  }
+
+  const matchWords = new Set(normalizedMatchTitle.split(" "));
+  const searchWords = new Set(normalizedSearchTitle.split(" "));
+  const allWordsMatch = matchWords.size === searchWords.size && [...matchWords].every((word) => searchWords.has(word));
+  if (allWordsMatch) {
+    return 92;
+  }
+
+  if (normalizedMatchTitle.includes(normalizedSearchTitle) || normalizedSearchTitle.includes(normalizedMatchTitle)) {
+    return 60;
+  }
+
+  return 0;
+}
+
+function scoreLyricsMatch(match: LyricsMatch, title: string, referenceTitle?: string) {
+  let score = scoreTitleMatch(match.trackName, title);
+
+  score += scoreArtistHint(match.artistName, referenceTitle, title);
 
   if (match.plainLyrics) {
     score += 14;
@@ -101,13 +195,12 @@ function scoreLyricsMatch(match: LyricsMatch, title: string, artist: string, dur
     score += 10;
   }
 
-  if (typeof durationMs === "number" && typeof match.duration === "number") {
-    const diffSeconds = Math.abs(match.duration - durationMs / 1000);
-    score += Math.max(0, 15 - diffSeconds);
-  }
-
   if (match.instrumental) {
     score -= 30;
+  }
+
+  if (ALTERNATE_VERSION_PATTERN.test(match.trackName)) {
+    score -= 45;
   }
 
   return score;
@@ -134,46 +227,49 @@ async function fetchLrcLibSearch(params: URLSearchParams) {
 }
 
 export async function findLyricsForTrack(options: {
-  title: string;
-  artist: string;
-  albumName?: string;
-  durationMs?: number;
+  titles: string[];
+  referenceTitle?: string;
 }) {
-  const exactParams = new URLSearchParams({
-    track_name: options.title,
-    artist_name: options.artist
-  });
-
-  if (options.albumName) {
-    exactParams.set("album_name", options.albumName);
-  }
-
-  if (typeof options.durationMs === "number") {
-    exactParams.set("duration", String(Math.round(options.durationMs / 1000)));
-  }
-
-  const broadParams = new URLSearchParams({
-    q: `${options.artist} ${options.title}`
-  });
-
-  const resultSets = await Promise.allSettled([
-    fetchLrcLibSearch(exactParams),
-    fetchLrcLibSearch(broadParams)
-  ]);
-
-  const matches = resultSets
-    .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
-    .filter((match) => match.plainLyrics || match.syncedLyrics);
-
-  if (matches.length === 0) {
+  const titles = [...new Set(options.titles.map((title) => title.trim()).filter(Boolean))];
+  if (titles.length === 0) {
     return null;
   }
 
-  return matches
-    .map((match) => ({
-      match,
-      score: scoreLyricsMatch(match, options.title, options.artist, options.durationMs)
+  // YouTube titles and channel names are unsuitable as search terms because they
+  // often describe a cover, live version, or upload. Search LRCLIB's track-title
+  // field with every likely title, then use the selected video's title only as a
+  // non-blocking hint to rank records that share the same track title.
+  const resultSets = await Promise.allSettled(
+    titles.map(async (title) => ({
+      title,
+      matches: await fetchLrcLibSearch(new URLSearchParams({ track_name: title }))
     }))
+  );
+  const rankedMatches = new Map<number, { match: LyricsMatch; score: number }>();
+
+  for (const result of resultSets) {
+    if (result.status !== "fulfilled") {
+      continue;
+    }
+
+    for (const match of result.value.matches) {
+      if (!match.plainLyrics && !match.syncedLyrics) {
+        continue;
+      }
+
+      const score = scoreLyricsMatch(match, result.value.title, options.referenceTitle);
+      const existing = rankedMatches.get(match.id);
+      if (!existing || score > existing.score) {
+        rankedMatches.set(match.id, { match, score });
+      }
+    }
+  }
+
+  if (rankedMatches.size === 0) {
+    return null;
+  }
+
+  return [...rankedMatches.values()]
     .sort((a, b) => b.score - a.score)[0].match;
 }
 

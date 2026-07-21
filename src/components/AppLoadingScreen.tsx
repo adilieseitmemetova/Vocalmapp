@@ -10,7 +10,7 @@ export function AppLoadingScreen({ label, description, showLabel = true }: AppLo
   return (
     <main className="app-loading-screen" id="main-content">
       <section className="app-loading-card" role="status" aria-live="polite" aria-label={label}>
-        <Image className="h-auto w-44" src="/images/vocalmapp-sidebar-logo.svg" alt="" width={286} height={36} priority />
+        <Image className="h-auto w-44" src="/images/vocalmapp-sidebar-logo.svg" alt="" width={286} height={40} priority unoptimized />
         <div className="app-loading-wave" aria-hidden="true">
           <span />
           <span />

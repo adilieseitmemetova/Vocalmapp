@@ -42,6 +42,7 @@ function loadYouTubeIframeApi() {
 function playerErrorCode(code: number): YouTubePlayerErrorCode {
   if (code === 2) return "invalidVideo";
   if (code === 101 || code === 150) return "embeddingRestricted";
+  if (code === 153) return "identityMissing";
   return "videoUnavailable";
 }
 
@@ -99,6 +100,7 @@ export function useYouTubePlayer({
             controls: 1,
             modestbranding: 1,
             origin: window.location.origin,
+            widget_referrer: window.location.href,
             playsinline: 1,
             rel: 0
           },

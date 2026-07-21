@@ -7,6 +7,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const codeBoxCount = 6;
@@ -208,11 +211,13 @@ export function EmailCodeForm() {
   }
 
   return (
-    <div className="mt-6 grid gap-4">
+    <div className="mt-8 grid gap-5">
       {step === "email" ? (
         <>
-          <button
-            className="relative inline-flex h-11 items-center justify-center rounded-full border border-stone-200 bg-white px-12 text-sm font-semibold text-stone-700 transition hover:bg-stone-50 active:scale-[0.99] disabled:opacity-60"
+          <Button
+            className="relative h-12 w-full rounded-4xl px-12 font-semibold"
+            variant="outline"
+            size="lg"
             type="button"
             onClick={handleGoogleSignIn}
             disabled={isRedirecting}
@@ -232,19 +237,19 @@ export function EmailCodeForm() {
               />
             )}
             {isRedirecting ? t("googleRedirecting") : t("googleSubmit")}
-          </button>
+          </Button>
 
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 text-[0.7rem] font-semibold text-stone-400">
-            <span className="h-px bg-stone-200" />
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 text-[0.7rem] font-semibold tracking-[0.12em] text-muted-foreground">
+            <span className="h-px bg-border" />
             <span>{t("orDivider")}</span>
-            <span className="h-px bg-stone-200" />
+            <span className="h-px bg-border" />
           </div>
 
           <form className="grid gap-4 text-center" onSubmit={handleEmailSubmit}>
-            <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="email">
+            <label className="grid gap-2 text-sm font-semibold text-foreground" htmlFor="email">
               <span className="sr-only">{t("emailLabel")}</span>
-              <input
-                className="h-11 rounded-md border border-stone-200 bg-white px-4 text-sm font-medium text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              <Input
+                className="h-12 rounded-4xl bg-input/35 px-5 font-medium"
                 id="email"
                 name="email"
                 type="email"
@@ -255,20 +260,21 @@ export function EmailCodeForm() {
                 required
               />
             </label>
-            <button
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(5,150,105,0.28)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+            <Button
+              className="h-12 w-full rounded-4xl font-semibold shadow-[0_14px_30px_var(--vm-accent-shadow-medium)]"
+              size="lg"
               type="submit"
               disabled={isSending}
             >
               {isSending ? <Loader2 className="spin size-4" /> : <Mail size={16} />}
               {isSending ? t("codeSending") : t("codeSubmit")}
-            </button>
-            <p className="mx-auto max-w-xs text-xs leading-5 text-stone-500">{t("continueNote")}</p>
+            </Button>
+            <p className="mx-auto max-w-xs text-xs leading-5 text-muted-foreground">{t("continueNote")}</p>
           </form>
         </>
       ) : (
         <form className="grid gap-4 text-center" onSubmit={handleCodeSubmit}>
-          <label className="grid gap-2 text-sm font-semibold text-stone-800" htmlFor="otp-code">
+          <label className="grid gap-2 text-sm font-semibold text-foreground" htmlFor="otp-code">
             <span className="sr-only">{t("codeLabel")}</span>
             <div className="relative">
               <div className="mx-auto grid w-full max-w-[20rem] grid-cols-6 gap-2" aria-hidden="true">
@@ -277,8 +283,8 @@ export function EmailCodeForm() {
 
                   return (
                     <span
-                      className={`grid aspect-square min-h-0 place-items-center rounded-md border bg-white text-lg font-semibold text-stone-950 shadow-[inset_0_1px_0_rgba(0,0,0,0.03)] transition ${
-                        isActive ? "border-emerald-500 ring-4 ring-emerald-100" : "border-stone-200"
+                      className={`grid aspect-square min-h-0 place-items-center rounded-2xl border bg-input/30 text-lg font-semibold text-foreground transition ${
+                        isActive ? "border-ring ring-[3px] ring-ring/50" : "border-input"
                       }`}
                       key={index}
                     >
@@ -303,50 +309,53 @@ export function EmailCodeForm() {
                 required
               />
             </div>
-            <span className="text-xs font-medium leading-5 text-stone-500" id="otp-code-help">
+            <span className="text-xs font-medium leading-5 text-muted-foreground" id="otp-code-help">
               {t("codeHelp", { email: confirmedEmail })}
             </span>
           </label>
-          <button
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(5,150,105,0.28)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+          <Button
+            className="h-12 w-full rounded-4xl font-semibold shadow-[0_14px_30px_var(--vm-accent-shadow-medium)]"
+            size="lg"
             type="submit"
             disabled={isVerifying}
           >
             {isVerifying ? <Loader2 className="spin size-4" /> : <Check size={16} />}
             {isVerifying ? t("codeVerifying") : t("codeVerify")}
-          </button>
+          </Button>
           <div className="grid grid-cols-2 gap-2">
-            <button
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-800 transition hover:bg-stone-50 disabled:opacity-60"
+            <Button
+              className="h-10 rounded-4xl text-xs font-semibold"
+              variant="outline"
+              size="lg"
               type="button"
               onClick={() => sendCode(confirmedEmail)}
               disabled={isSending || !confirmedEmail}
             >
               {isSending ? <Loader2 className="spin size-4" /> : <RefreshCw size={15} />}
               {t("codeResend")}
-            </button>
-            <button
-              className="inline-flex h-10 items-center justify-center rounded-full border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-800 transition hover:bg-stone-50"
+            </Button>
+            <Button
+              className="h-10 rounded-4xl text-xs font-semibold"
+              variant="ghost"
+              size="lg"
               type="button"
               onClick={changeEmail}
             >
               {t("changeEmail")}
-            </button>
+            </Button>
           </div>
         </form>
       )}
 
       {message ? (
-        <div
-          className={`rounded-lg border px-3 py-2 text-xs leading-5 ${
-            status === "sent" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-800"
-          }`}
-          role="status"
+        <Alert
+          className={status === "sent" ? "border-primary/20 bg-primary/10 text-foreground" : undefined}
+          variant={status === "sent" ? "default" : "destructive"}
           aria-live="polite"
         >
-          <strong className="block">{status === "sent" ? t("codeSentTitle") : t("errorTitle")}</strong>
-          {message}
-        </div>
+          <AlertTitle>{status === "sent" ? t("codeSentTitle") : t("errorTitle")}</AlertTitle>
+          <AlertDescription className={status === "sent" ? "text-foreground/70" : undefined}>{message}</AlertDescription>
+        </Alert>
       ) : null}
     </div>
   );

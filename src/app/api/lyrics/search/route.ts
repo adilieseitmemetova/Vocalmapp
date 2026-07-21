@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 const TEXT_PARAM_MAX_LENGTH = 200;
-const ALLOWED_SEARCH_PARAMS = new Set(["q", "track_name", "artist_name", "album_name", "duration"]);
+const ALLOWED_SEARCH_PARAMS = new Set(["q", "track_name"]);
 
 function buildSafeSearchParams(requestUrl: URL) {
   const safeParams = new URLSearchParams();
@@ -20,11 +20,7 @@ function buildSafeSearchParams(requestUrl: URL) {
       continue;
     }
 
-    if (key === "duration") {
-      if (!/^\d{1,5}$/.test(trimmedValue)) {
-        return null;
-      }
-    } else if (trimmedValue.length > TEXT_PARAM_MAX_LENGTH) {
+    if (trimmedValue.length > TEXT_PARAM_MAX_LENGTH) {
       return null;
     }
 
@@ -46,7 +42,7 @@ export async function GET(request: NextRequest) {
   const safeParams = buildSafeSearchParams(requestUrl);
 
   if (!safeParams || safeParams.size === 0) {
-    return NextResponse.json({ error: "Enter a song title or artist." }, { status: 400 });
+    return NextResponse.json({ error: "Enter a song title." }, { status: 400 });
   }
 
   const upstreamUrl = `https://lrclib.net/api/search?${safeParams}`;

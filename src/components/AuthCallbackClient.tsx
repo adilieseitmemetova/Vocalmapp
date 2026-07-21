@@ -4,8 +4,10 @@ import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { createClient } from "@/lib/supabase/client";
 import { AppLoadingScreen } from "@/components/AppLoadingScreen";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/client";
 
 const authNextStorageKey = "vocalmapp:auth-next";
 
@@ -108,12 +110,14 @@ export function AuthCallbackClient() {
 
   return (
     <main className="app-loading-screen" id="main-content">
-      <div className="grid w-full max-w-sm justify-items-center gap-4 rounded-[1.5rem] bg-white p-8 text-center shadow-[0_30px_90px_rgba(0,104,83,0.24)]">
-        <p className="text-lg font-bold text-stone-950">{t("callbackErrorTitle")}</p>
-        <p className="text-sm leading-6 text-stone-500">{errorMessage}</p>
-        <button className="mt-2 rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white" type="button" onClick={() => router.replace("/login")}>
+      <div className="grid w-full max-w-sm justify-items-center gap-4 rounded-4xl border border-border bg-card p-8 text-center shadow-[0_30px_90px_var(--vm-accent-shadow-soft)]">
+        <Alert className="text-left" variant="destructive">
+          <AlertTitle>{t("callbackErrorTitle")}</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+        <Button className="mt-2" size="lg" type="button" onClick={() => router.replace("/login")}>
           {t("callbackBackToLogin")}
-        </button>
+        </Button>
       </div>
     </main>
   );

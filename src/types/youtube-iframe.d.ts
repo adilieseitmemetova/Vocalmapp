@@ -30,6 +30,7 @@ declare global {
       origin?: string;
       playsinline?: 0 | 1;
       rel?: 0 | 1;
+      widget_referrer?: string;
     };
     events?: {
       onReady?: (event: { target: YouTubePlayerInstance }) => void;

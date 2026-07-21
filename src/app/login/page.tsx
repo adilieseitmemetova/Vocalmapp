@@ -22,29 +22,56 @@ export default async function LoginPage() {
 
   return (
     <main
-      className="relative grid min-h-dvh place-items-center overflow-hidden bg-[#87f0dc] bg-cover bg-center px-5 py-10 sm:px-6"
+      className="relative isolate flex min-h-dvh items-start justify-center overflow-hidden bg-primary bg-cover bg-center px-4 py-[max(1rem,env(safe-area-inset-top))] sm:items-center sm:p-6 lg:p-8"
       id="main-content"
       style={{ backgroundImage: "url('/images/auth-green-bg.png')" }}
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(220,255,246,0.18),rgba(35,181,156,0.08)_42%,rgba(12,130,111,0.22)_100%)]" />
-      <section className="relative z-10 flex w-full max-w-[32rem] flex-col items-center gap-6">
-        <div className="grid h-16 w-56 place-items-center">
+      <div className="absolute inset-0 bg-primary/30" />
+      <div className="absolute -left-28 top-12 size-80 rounded-full bg-primary/10 blur-3xl" />
+      <div className="absolute -right-32 bottom-0 size-96 rounded-full bg-chart-1/15 blur-3xl" />
+
+      <section className="relative z-10 grid w-full max-w-[34rem] overflow-hidden rounded-[1.5rem] border border-white/50 bg-card/95 shadow-[0_32px_100px_var(--vm-accent-shadow-strong)] backdrop-blur-md lg:max-w-[72rem] lg:min-h-[42rem] lg:grid-cols-[0.85fr_1fr] lg:rounded-4xl lg:bg-card">
+        <aside className="relative hidden overflow-hidden bg-primary p-10 text-primary-foreground lg:flex lg:flex-col">
+          <div className="absolute -right-24 -top-32 size-96 rounded-full border-[40px] border-primary-foreground/10" />
+          <div className="absolute -bottom-40 -left-32 size-[30rem] rounded-full border-[52px] border-primary-foreground/10" />
           <Image
-            className="h-14 w-auto"
+            className="relative h-auto w-52"
             src="/images/vocalmapp-logo-white.svg"
             alt={common("appName")}
-            width={196}
-            height={93}
+            width={286}
+            height={40}
             priority
+            unoptimized
           />
-        </div>
+          <div className="relative mt-auto max-w-sm">
+            <p className="text-xs font-semibold tracking-[0.16em] text-primary-foreground/70 uppercase">{t("eyebrow")}</p>
+            <p className="mt-4 text-3xl font-semibold leading-tight tracking-tight">{t("subtitle")}</p>
+            <div className="mt-8 flex gap-2" aria-hidden="true">
+              <span className="h-1.5 w-16 rounded-full bg-primary-foreground" />
+              <span className="h-1.5 w-6 rounded-full bg-primary-foreground/45" />
+              <span className="h-1.5 w-10 rounded-full bg-primary-foreground/25" />
+            </div>
+          </div>
+        </aside>
 
-        <div className="w-full rounded-[1.5rem] bg-white p-6 text-center shadow-[0_30px_90px_rgba(0,104,83,0.26)] ring-1 ring-emerald-950/5 sm:p-8">
-          <h1 className="text-2xl font-bold leading-tight text-stone-950 sm:text-[1.7rem]">{t("title")}</h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-stone-500">{t("subtitle")}</p>
-          <Suspense>
-            <EmailCodeForm />
-          </Suspense>
+        <div className="flex min-w-0 flex-col justify-center px-5 py-7 sm:px-10 sm:py-10 lg:px-16">
+          <Image
+            className="mx-auto mb-7 h-auto w-40 lg:hidden"
+            src="/images/vocalmapp-logo-green.svg"
+            alt={common("appName")}
+            width={286}
+            height={40}
+            priority
+            unoptimized
+          />
+          <div className="mx-auto w-full max-w-md text-center lg:mx-0 lg:text-left">
+            <p className="text-xs font-semibold tracking-[0.16em] text-primary uppercase">{t("eyebrow")}</p>
+            <h1 className="mt-3 text-[1.75rem] font-semibold leading-tight tracking-tight text-foreground sm:text-4xl">{t("title")}</h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">{t("subtitle")}</p>
+            <Suspense>
+              <EmailCodeForm />
+            </Suspense>
+          </div>
         </div>
       </section>
     </main>

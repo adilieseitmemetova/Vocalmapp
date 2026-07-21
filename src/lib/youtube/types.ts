@@ -13,4 +13,4 @@ export type YouTubeVideoSearchResult = {
 
 export type YouTubeSearchErrorCode = "authRequired" | "queryRequired" | "queryTooLong" | "rateLimited" | "missingApiKey" | "invalidApiKey" | "quotaExceeded" | "searchFailed" | "unavailable";
 
-export type YouTubePlayerErrorCode = "invalidVideo" | "videoUnavailable" | "embeddingRestricted" | "playerLoadFailed";
+export type YouTubePlayerErrorCode = "invalidVideo" | "videoUnavailable" | "embeddingRestricted" | "identityMissing" | "playerLoadFailed";

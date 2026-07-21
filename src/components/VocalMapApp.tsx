@@ -30,15 +30,18 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { SongSearch } from "@/components/SongSearch";
 import { YouTubePlayer } from "@/components/YouTubePlayer";
+import { buttonVariants } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   LYRICS_TOKENIZER_VERSION,
   buildLyrics,
   findLyricsForTrack,
+  getLyricsSearchTitleCandidates,
   lineWordCountsFromText,
   lyricsToText,
   syncedLyricsToPlainText
@@ -130,14 +133,20 @@ const systemMarkerCodes = new Set([
   "mute"
 ]);
 
-const primaryButtonClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_12px_26px_rgba(5,150,105,0.22)] transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60";
-const secondaryButtonClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-800 transition hover:border-emerald-200 hover:bg-emerald-50 active:scale-[0.99] disabled:opacity-60";
-const iconButtonClass =
-  "inline-grid size-10 flex-none place-items-center rounded-xl border border-stone-200 bg-white text-stone-700 transition hover:border-emerald-200 hover:bg-emerald-50 disabled:opacity-60";
+const primaryButtonClass = buttonVariants({
+  className: "min-h-10 rounded-4xl px-4 py-2 font-semibold shadow-[0_12px_26px_var(--vm-accent-shadow-strong)]"
+});
+const secondaryButtonClass = buttonVariants({
+  variant: "outline",
+  className: "min-h-10 rounded-4xl px-4 py-2 font-semibold"
+});
+const iconButtonClass = buttonVariants({
+  variant: "outline",
+  size: "icon",
+  className: "size-10 flex-none rounded-2xl"
+});
 const inputClass =
-  "h-10 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100";
+  "h-10 w-full min-w-0 rounded-4xl border border-input bg-input/30 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50";
 
 function createId() {
   return crypto.randomUUID();
@@ -660,7 +669,7 @@ function MarkerBadge({ markerId, markerById, onSeekToTimestamp }: { markerId: st
 
   return onSeekToTimestamp ? (
     <button
-      className={`${className} transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-emerald-200`}
+      className={`${className} transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-ring/30`}
       type="button"
       style={makeMarkerStyle(marker)}
       title={marker.meaning}
@@ -685,7 +694,7 @@ function MarkerBadge({ markerId, markerById, onSeekToTimestamp }: { markerId: st
 function AudioDot({ onPlay, title }: { onPlay: () => void; title: string }) {
   return (
     <button
-      className="inline-grid size-7 place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
+      className="inline-grid size-7 place-items-center rounded-full border border-primary/20 bg-primary/10 text-primary transition hover:bg-primary/20"
       type="button"
       title={title}
       onClick={onPlay}
@@ -808,7 +817,7 @@ function LyricsLine({
                       <span
                         className="h-px w-full min-w-8 rounded-full"
                         key={markerId}
-                        style={{ backgroundColor: marker?.color ?? "#059669" }}
+                        style={{ backgroundColor: marker?.color ?? "var(--primary)" }}
                         title={marker?.meaning}
                       />
                     );
@@ -821,8 +830,8 @@ function LyricsLine({
                 </span>
                 <span className="inline-flex items-center">
                   <button
-                    className={`max-w-full touch-pan-y select-none rounded-md px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-emerald-200 ${
-                      wordIsSelected ? "bg-emerald-100 ring-2 ring-emerald-200" : "hover:bg-emerald-50 hover:ring-2 hover:ring-emerald-100 focus:bg-emerald-50"
+                    className={`max-w-full touch-pan-y select-none rounded-md px-1 py-0.5 leading-tight text-inherit transition focus:outline-none focus:ring-2 focus:ring-ring/30 ${
+                      wordIsSelected ? "bg-primary/10 ring-2 ring-primary/25" : "hover:bg-primary/5 hover:ring-2 hover:ring-primary/20 focus:bg-primary/5"
                     }`}
                     type="button"
                     data-song-id={songId}
@@ -857,7 +866,7 @@ function LyricsLine({
                   </button>
                   {hasNextWord ? (
                     <button
-                      className="h-[1.7em] w-3 touch-pan-y select-none rounded transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                      className="h-[1.7em] w-3 touch-pan-y select-none rounded transition hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-ring/20"
                       type="button"
                       tabIndex={-1}
                       aria-hidden="true"
@@ -884,6 +893,7 @@ function LyricsLine({
 
 function SongMenuCard({
   song,
+  player,
   onEdit,
   onDelete,
   optionsOpen,
@@ -891,6 +901,7 @@ function SongMenuCard({
   labels
 }: {
   song: Song;
+  player?: ReactNode;
   onEdit: (song: Song) => void;
   onDelete: (song: Song) => void;
   optionsOpen: boolean;
@@ -900,8 +911,6 @@ function SongMenuCard({
     noArtist: string;
     lines: string;
     markers: string;
-    youtube: string;
-    workspaceHint: string;
     edit: string;
     delete: string;
     options: string;
@@ -909,15 +918,17 @@ function SongMenuCard({
 }) {
   return (
     <section className="relative grid gap-3 border-t border-stone-200/80 pt-4 pb-1">
-      <div className="relative aspect-square w-full overflow-hidden rounded-[1.125rem] border border-stone-200 bg-stone-100 shadow-[0_10px_24px_rgba(33,63,53,0.10)]">
-        {song.thumbnailUrl ? (
-          <Image className="size-full object-cover" src={song.thumbnailUrl} alt={labels.coverAlt} width={640} height={640} priority loading="eager" />
-        ) : (
-          <div className="grid size-full place-items-center bg-stone-50 text-stone-500">
-            <Music2 size={28} />
-          </div>
-        )}
-      </div>
+      {player ?? (
+        <div className="relative aspect-square w-full overflow-hidden rounded-[1.125rem] border border-stone-200 bg-stone-100 shadow-[0_10px_24px_var(--vm-accent-shadow-soft)]">
+          {song.thumbnailUrl ? (
+            <Image className="size-full object-cover" src={song.thumbnailUrl} alt={labels.coverAlt} width={640} height={640} priority loading="eager" />
+          ) : (
+            <div className="grid size-full place-items-center bg-stone-50 text-stone-500">
+              <Music2 size={28} />
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="relative min-w-0 self-center pr-9" data-song-options-menu="true">
         <p className="truncate text-[0.625rem] font-bold uppercase tracking-[0.12em] text-stone-500">{song.artist ?? labels.noArtist}</p>
@@ -962,27 +973,13 @@ function SongMenuCard({
         ) : null}
       </div>
 
-      <div className="grid gap-2">
-        {song.youtubeVideoId ? (
-          <a
-            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-stone-950 px-3 text-xs font-semibold text-white transition hover:bg-stone-800"
-            href={`https://www.youtube.com/watch?v=${encodeURIComponent(song.youtubeVideoId)}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <ExternalLink size={13} />
-            {labels.youtube}
-          </a>
-        ) : null}
-        <p className="text-center text-[0.6875rem] font-medium leading-4 text-stone-400">{labels.workspaceHint}</p>
-      </div>
-
     </section>
   );
 }
 
 function SongPlayerDock({
   song,
+  placement = "floating",
   provider,
   selectedAudioId,
   onProviderChange,
@@ -996,6 +993,7 @@ function SongPlayerDock({
   labels
 }: {
   song: Song;
+  placement?: "floating" | "sidebar";
   provider: AudioProvider;
   selectedAudioId: string | null;
   onProviderChange: (provider: AudioProvider) => void;
@@ -1014,6 +1012,7 @@ function SongPlayerDock({
     noFile: string;
     deleteAudio: string;
     addFile: string;
+    addOtherFile: string;
     audioNameTitle: string;
     audioNameLabel: string;
     audioNamePlaceholder: string;
@@ -1028,7 +1027,6 @@ function SongPlayerDock({
     cancel: string;
     close: string;
     youtubeTitle: string;
-    audioNotice: string;
     expand: string;
     collapse: string;
   };
@@ -1040,9 +1038,11 @@ function SongPlayerDock({
   const videoId = getYouTubeVideoId(song);
   const hasYouTube = Boolean(videoId);
   const hasFiles = song.songAudios.length > 0;
+  const uploadButtonLabel = hasYouTube || hasFiles ? labels.addOtherFile : labels.addFile;
   const hasActiveProvider = (provider === "youtube" && hasYouTube) || (provider === "file" && hasFiles);
   const activeAudio = song.songAudios.find((audioReference) => audioReference.id === selectedAudioId) ?? song.songAudios[0];
   const fileUrl = useAudioUrl(provider === "file" ? activeAudio : undefined, supabase);
+  const isSidebarPlayer = placement === "sidebar";
 
   useEffect(() => {
     if (!isUploadDialogOpen) {
@@ -1062,15 +1062,17 @@ function SongPlayerDock({
   }, [isUploadDialogOpen]);
 
   return (
-    <div className="audio-provider-dock">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-        <div className="flex min-w-0 items-center gap-3">
-          {song.thumbnailUrl ? <Image className="size-11 flex-none rounded-[0.8rem] object-cover" src={song.thumbnailUrl} alt={labels.nowPlaying} width={44} height={44} /> : <span className="grid size-11 flex-none place-items-center rounded-[0.8rem] bg-stone-100"><Music2 className="text-stone-500" size={20} /></span>}
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold tracking-[-0.01em] text-stone-950">{song.title}</p>
-            <p className="truncate text-xs text-stone-500">{provider === "file" && activeAudio ? activeAudio.label : song.artist ?? labels.nowPlaying}</p>
+    <div className={`audio-provider-dock ${isSidebarPlayer ? "audio-provider-dock--sidebar" : ""}`}>
+      <div className={isSidebarPlayer ? "flex items-center justify-end gap-2" : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"}>
+        {!isSidebarPlayer ? (
+          <div className="flex min-w-0 items-center gap-3">
+            {song.thumbnailUrl ? <Image className="size-11 flex-none rounded-[0.8rem] object-cover" src={song.thumbnailUrl} alt={labels.nowPlaying} width={44} height={44} /> : <span className="grid size-11 flex-none place-items-center rounded-[0.8rem] bg-stone-100"><Music2 className="text-stone-500" size={20} /></span>}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-stone-950">{song.title}</p>
+              <p className="truncate text-xs text-stone-500">{provider === "file" && activeAudio ? activeAudio.label : song.artist ?? labels.nowPlaying}</p>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         <div className="flex items-center gap-1.5">
           {hasYouTube ? (
@@ -1087,7 +1089,7 @@ function SongPlayerDock({
           {hasFiles ? (
             <button
               className={`inline-flex h-8 max-w-36 items-center justify-center rounded-full border px-2.5 text-[0.6875rem] font-semibold transition sm:px-3 sm:text-xs ${
-                provider === "file" ? "border-emerald-600 bg-emerald-600 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
+                provider === "file" ? "border-primary bg-primary text-primary-foreground" : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
               }`}
               type="button"
               onClick={() => onProviderChange("file")}
@@ -1099,7 +1101,7 @@ function SongPlayerDock({
           <button
             className="audio-provider-upload"
             type="button"
-            title={labels.addFile}
+            title={uploadButtonLabel}
             onClick={() => {
               setPendingUpload(null);
               setPendingUploadLabel("");
@@ -1107,11 +1109,11 @@ function SongPlayerDock({
             }}
           >
             <Upload size={14} />
-            <span>{labels.addFile}</span>
+            <span>{uploadButtonLabel}</span>
           </button>
-          {hasActiveProvider ? (
+          {hasActiveProvider && !isSidebarPlayer ? (
             <button
-              className="inline-grid size-8 place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-emerald-200 hover:bg-emerald-50 lg:hidden"
+              className="inline-grid size-8 place-items-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:border-primary/20 hover:bg-primary/5 lg:hidden"
               type="button"
               onClick={() => setIsExpanded((current) => !current)}
               aria-expanded={isExpanded}
@@ -1134,18 +1136,10 @@ function SongPlayerDock({
               onTimeUpdate={onTimeUpdate}
               onError={onPlayerError}
               labels={{
-                play: "Play",
-                pause: "Pause",
-                rewind: "Back 10 seconds",
-                forward: "Forward 10 seconds",
                 speed: "Playback speed",
-                loopStart: "Set loop start",
-                loopEnd: "Set loop end",
-                clearLoop: "Clear loop",
                 playerUnavailable: "Loading the official YouTube player..."
               }}
             />
-            <p className="text-xs leading-5 text-stone-500">{labels.audioNotice}</p>
           </div>
         ) : null}
         {provider === "file" && hasFiles ? (
@@ -1160,7 +1154,7 @@ function SongPlayerDock({
             </div>
             {song.songAudios.length > 1 ? (
               <select
-                className="h-10 rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                className="h-10 rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none focus:border-primary focus:ring-4 focus:ring-primary/20"
                 value={activeAudio?.id ?? ""}
                 onChange={(event) => onSelectedAudioChange(event.target.value)}
                 aria-label={labels.fileSelect}
@@ -1336,6 +1330,7 @@ export function VocalMapApp({
   const [markerOrderIds, setMarkerOrderIds] = useState<string[]>(() => translatedInitialMarkers.map((marker) => marker.id));
   const [customMarkerDraft, setCustomMarkerDraft] = useState(EMPTY_CUSTOM_MARKER);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const [isMobileLibraryOpen, setIsMobileLibraryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeSettingsPanel, setActiveSettingsPanel] = useState<SettingsPanel>("markers");
@@ -1380,6 +1375,7 @@ export function VocalMapApp({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const lyricsSearchRequestRef = useRef(0);
   const librarySearchInputRef = useRef<HTMLInputElement | null>(null);
   const recordingSelectionRef = useRef<SelectedTarget | null>(null);
   const wordSelectionDragRef = useRef<{
@@ -2242,35 +2238,13 @@ export function VocalMapApp({
 
   async function importYouTubeVideo(video: YouTubeVideoSearchResult, originalSearchQuery: string) {
     const isReplacingExistingSong = Boolean(editingSongId && editingSongId !== "new");
-    let lyricsText = draft.lyricsText;
-
-    if (!isReplacingExistingSong) {
-      setStatusMessage(t("findLyrics"));
-      try {
-        const match = await findLyricsForTrack({
-          title: video.title,
-          artist: video.artistName,
-          durationMs: video.durationMs
-        });
-        if (match?.plainLyrics) {
-          lyricsText = match.plainLyrics;
-          setStatusMessage(t("lyricsFound"));
-        } else if (match?.syncedLyrics) {
-          lyricsText = syncedLyricsToPlainText(match.syncedLyrics);
-          setStatusMessage(t("syncedLyricsFound"));
-        } else {
-          setStatusMessage(t("lyricsNotFound"));
-        }
-      } catch {
-        setStatusMessage(t("lyricsFetchFailed"));
-      }
-    }
+    const lyricsSearchRequestId = ++lyricsSearchRequestRef.current;
 
     setDraft((currentDraft) => ({
       ...currentDraft,
       title: isReplacingExistingSong ? currentDraft.title : video.title,
       artist: isReplacingExistingSong ? currentDraft.artist : video.artistName,
-      lyricsText,
+      lyricsText: isReplacingExistingSong ? currentDraft.lyricsText : "",
       youtubeVideoId: video.youtubeVideoId,
       videoTitle: video.title,
       channelTitle: video.channelTitle,
@@ -2282,13 +2256,45 @@ export function VocalMapApp({
     setPreferredAudioProvider("youtube");
     closeNoteEditor();
     setSelection(null);
+
+    if (!isReplacingExistingSong) {
+      setStatusMessage(t("findLyrics"));
+      try {
+        const match = await findLyricsForTrack({
+          titles: getLyricsSearchTitleCandidates(originalSearchQuery, video.title),
+          referenceTitle: video.title
+        });
+        if (lyricsSearchRequestRef.current !== lyricsSearchRequestId) {
+          return;
+        }
+
+        let lyricsText = "";
+        if (match?.plainLyrics) {
+          lyricsText = match.plainLyrics;
+          setStatusMessage(t("lyricsFound"));
+        } else if (match?.syncedLyrics) {
+          lyricsText = syncedLyricsToPlainText(match.syncedLyrics);
+          setStatusMessage(t("syncedLyricsFound"));
+        } else {
+          setStatusMessage(t("lyricsNotFound"));
+        }
+        setDraft((currentDraft) => currentDraft.youtubeVideoId === video.youtubeVideoId
+          ? { ...currentDraft, lyricsText }
+          : currentDraft);
+      } catch {
+        if (lyricsSearchRequestRef.current === lyricsSearchRequestId) {
+          setStatusMessage(t("lyricsFetchFailed"));
+        }
+      }
+    }
   }
 
   function handleYouTubePlayerError(errorCode: YouTubePlayerErrorCode) {
-    const messageKey: Record<YouTubePlayerErrorCode, "youtubeInvalidVideo" | "youtubeVideoUnavailable" | "youtubeEmbeddingRestricted" | "youtubePlayerLoadFailed"> = {
+    const messageKey: Record<YouTubePlayerErrorCode, "youtubeInvalidVideo" | "youtubeVideoUnavailable" | "youtubeEmbeddingRestricted" | "youtubePlayerIdentityMissing" | "youtubePlayerLoadFailed"> = {
       invalidVideo: "youtubeInvalidVideo",
       videoUnavailable: "youtubeVideoUnavailable",
       embeddingRestricted: "youtubeEmbeddingRestricted",
+      identityMissing: "youtubePlayerIdentityMissing",
       playerLoadFailed: "youtubePlayerLoadFailed"
     };
     setStatusMessage(t(messageKey[errorCode]));
@@ -3052,11 +3058,88 @@ export function VocalMapApp({
     : undefined;
   const profileDisplayName = profile.displayName?.trim() || userEmail || t("profileFallbackName");
   const profileMeta = profile.vocalGoal?.trim() || t("profileFallbackMeta");
+  const activeSongPlayer = activeSong && !editingSongId ? (
+    <SongPlayerDock
+      song={activeSong}
+      placement="sidebar"
+      provider={activeAudioProvider}
+      selectedAudioId={selectedSongAudioId}
+      onProviderChange={setPreferredAudioProvider}
+      onSelectedAudioChange={setSelectedSongAudioId}
+      onUpload={(song, file, label) => void uploadSongAudio(song, file, label)}
+      onRemove={(song, audioReference) => void removeSongAudio(song, audioReference)}
+      seekRequest={playerSeekRequest}
+      onTimeUpdate={setPlayerTimeMs}
+      onPlayerError={handleYouTubePlayerError}
+      supabase={supabase}
+      labels={{
+        nowPlaying: t("audioDockNowPlaying"),
+        youtube: common("youtube"),
+        file: t("audioDockFile"),
+        fileSelect: t("audioDockFileSelect"),
+        noFile: t("audioDockNoFile"),
+        deleteAudio: t("deleteSongAudio"),
+        addFile: t("addAudioFile"),
+        addOtherFile: t("addAnotherAudioFile"),
+        audioNameTitle: t("audioNameTitle"),
+        audioNameLabel: t("audioNameLabel"),
+        audioNamePlaceholder: t("audioNamePlaceholder"),
+        audioNameInstrumental: t("audioNameInstrumental"),
+        audioNameOriginal: t("audioNameOriginal"),
+        audioNameCover: t("audioNameCover"),
+        audioNameRequired: t("audioNameRequired"),
+        audioUploadDialogBody: t("audioUploadDialogBody"),
+        chooseAudioFile: t("chooseAudioFile"),
+        changeAudioFile: t("changeAudioFile"),
+        noAudioFile: t("noAudioFile"),
+        cancel: common("cancel"),
+        close: common("close"),
+        youtubeTitle: t("youtubePlayerTitle", { title: activeSong.title }),
+        expand: t("expandPlayer"),
+        collapse: t("collapsePlayer")
+      }}
+    />
+  ) : null;
+
+  function resizeSidebar(nextWidth: number) {
+    const maxWidth = Math.min(448, window.innerWidth * 0.45);
+    setSidebarWidth(Math.min(maxWidth, Math.max(288, nextWidth)));
+  }
+
+  function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const shell = event.currentTarget.closest(".vocalmap-shell");
+    if (!shell) {
+      return;
+    }
+
+    const shellLeft = shell.getBoundingClientRect().left;
+    const updateWidth = (clientX: number) => resizeSidebar(clientX - shellLeft - 14);
+    const onPointerMove = (moveEvent: PointerEvent) => updateWidth(moveEvent.clientX);
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    event.preventDefault();
+    updateWidth(event.clientX);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+  }
+
+  function resizeSidebarFromKeyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+
+    event.preventDefault();
+    resizeSidebar((sidebarWidth ?? 368) + (event.key === "ArrowLeft" ? -16 : 16));
+  }
 
   return (
     <div
       className="vocalmap-shell"
       data-sidebar-collapsed={isSidebarCollapsed}
+      style={sidebarWidth === null ? undefined : ({ "--vm-library-width": `${sidebarWidth}px` } as CSSProperties)}
     >
       <div className="vocalmap-backdrop" />
 
@@ -3073,10 +3156,6 @@ export function VocalMapApp({
         >
           <span className="grid size-10 flex-none place-items-center rounded-xl bg-[var(--vm-ink)] text-white">
             <Library size={18} />
-          </span>
-          <span className="min-w-0">
-            <Image className="h-auto w-28" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
-            <span className="mt-0.5 block truncate text-[0.625rem] font-bold uppercase tracking-[0.13em] text-stone-500">{t("libraryTitle")}</span>
           </span>
         </button>
         <div className="flex items-center gap-2">
@@ -3115,13 +3194,13 @@ export function VocalMapApp({
         {isSidebarCollapsed ? (
           <div className="hidden w-full items-center justify-between gap-2 lg:flex lg:w-10 lg:flex-col lg:justify-start">
             <button
-              className="grid h-10 w-12 flex-none place-items-center rounded-xl px-1 transition hover:bg-emerald-50"
+              className="grid h-10 w-12 flex-none place-items-center rounded-xl px-1 transition hover:bg-primary/5"
               type="button"
               onClick={() => setIsSidebarCollapsed(false)}
               aria-label={t("expandLibrary")}
               title={t("expandLibrary")}
             >
-              <Image className="h-auto w-full" src="/images/vocalmapp-sidebar-logo.svg" alt={common("appName")} width={286} height={36} priority />
+              <Image className="h-auto w-full" src="/images/vocalmapp-sidebar-logo.svg" alt={common("appName")} width={286} height={40} priority unoptimized />
             </button>
             <div className="flex items-center gap-2 lg:w-10 lg:flex-col lg:items-center">
               <button
@@ -3153,7 +3232,7 @@ export function VocalMapApp({
                 <Settings2 size={17} />
               </button>
               <button
-                className="inline-grid size-9 flex-none place-items-center rounded-full border border-emerald-200 bg-emerald-600 text-white transition hover:bg-emerald-700"
+                className="inline-grid size-9 flex-none place-items-center rounded-full border border-primary bg-primary text-primary-foreground transition hover:bg-primary/90"
                 type="button"
                 onClick={openManualDraft}
                 aria-label={t("newSong")}
@@ -3167,7 +3246,7 @@ export function VocalMapApp({
           <>
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Image className="h-auto w-44 flex-none" src="/images/vocalmapp-sidebar-logo.svg" alt={common("appName")} width={286} height={36} priority />
+            <Image className="h-auto w-52 flex-none" src="/images/vocalmapp-sidebar-logo.svg" alt={common("appName")} width={286} height={40} priority unoptimized />
           </div>
           <div className="flex flex-none items-center gap-2">
               <button
@@ -3213,6 +3292,7 @@ export function VocalMapApp({
         {activeSong ? (
           <SongMenuCard
             song={activeSong}
+            player={activeSongPlayer}
             onEdit={(song) => {
               setOpenSongOptionsId(null);
               setIsMobileLibraryOpen(false);
@@ -3229,8 +3309,6 @@ export function VocalMapApp({
               noArtist: common("noArtist"),
               lines: t("linesCount", { count: activeSong.lyrics.length }),
               markers: t("markersCount", { count: countMarkedTargets(activeSong) }),
-              youtube: common("youtube"),
-              workspaceHint: t("workspaceHint"),
               edit: common("edit"),
               delete: common("delete"),
               options: t("songOptions")
@@ -3246,8 +3324,8 @@ export function VocalMapApp({
               <span className="truncate">{t("libraryTitle")}</span>
             </div>
             <button
-              className={`inline-grid size-8 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-emerald-200 hover:bg-emerald-50 ${
-                isLibrarySearchOpen || localSearch ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-stone-200"
+              className={`inline-grid size-8 flex-none place-items-center rounded-full border bg-white text-stone-700 transition hover:border-primary/20 hover:bg-primary/5 ${
+                isLibrarySearchOpen || localSearch ? "border-primary/20 bg-primary/5 text-primary" : "border-stone-200"
               }`}
               type="button"
               onClick={() => {
@@ -3277,7 +3355,7 @@ export function VocalMapApp({
             {filteredSongs.map((song) => (
               <div
                 className={`relative grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-1 rounded-md border transition ${
-                  song.id === effectiveActiveSongId ? "border-emerald-200 bg-emerald-50" : "border-transparent hover:border-emerald-100 hover:bg-emerald-50/60"
+                  song.id === effectiveActiveSongId ? "border-primary/20 bg-primary/5" : "border-transparent hover:border-primary/10 hover:bg-primary/5"
                 }`}
                 key={song.id}
                 data-song-options-menu="true"
@@ -3420,9 +3498,22 @@ export function VocalMapApp({
         )}
       </aside>
 
-      <section className={`vocalmap-workspace ${activeAudioProvider && !editingSongId ? "has-audio-dock" : ""}`}>
+      <div
+        className="sidebar-resize-handle"
+        role="separator"
+        aria-label="Resize library"
+        aria-orientation="vertical"
+        aria-valuemin={288}
+        aria-valuemax={448}
+        aria-valuenow={sidebarWidth ?? 368}
+        tabIndex={0}
+        onPointerDown={startSidebarResize}
+        onKeyDown={resizeSidebarFromKeyboard}
+      />
+
+      <section className="vocalmap-workspace">
         {editingSongId ? (
-          <div className="song-editor-card mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.96] p-4 shadow-[0_28px_80px_rgba(0,104,83,0.16)] backdrop-blur-md sm:p-5">
+          <div className="song-editor-card mx-auto max-w-6xl rounded-[1.5rem] border border-white/70 bg-white/[0.96] p-4 shadow-[0_28px_80px_var(--vm-accent-shadow-soft)] backdrop-blur-md sm:p-5">
             <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase text-stone-500">{editingSongId === "new" ? t("editorNew") : t("editorEdit")}</p>
@@ -3454,7 +3545,7 @@ export function VocalMapApp({
             <section className="grid gap-4 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4">
               <div>
                 <p className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
-                  <span className="grid size-5 place-items-center rounded-full bg-emerald-600 text-[11px] leading-none text-white">2</span>
+                  <span className="grid size-5 place-items-center rounded-full bg-primary text-[11px] leading-none text-primary-foreground">2</span>
                   {t("songFlowDetailsTitle")}
                 </p>
                 <p className="mt-1 text-sm leading-5 text-stone-600">{t("songFlowDetailsBody")}</p>
@@ -3472,7 +3563,7 @@ export function VocalMapApp({
               </div>
 
               {songDraftHasImportedDetails ? (
-                <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+                <div className="flex items-center gap-3 rounded-xl border border-primary/10 bg-primary/5 p-3">
                   {draft.thumbnailUrl ? <Image className="rounded-md object-cover" src={draft.thumbnailUrl} alt={draft.title ? t("coverAlt", { title: draft.title }) : t("importedCoverAlt")} width={96} height={54} /> : null}
                   <div className="min-w-0">
                     <p className="text-xs font-bold uppercase text-stone-500">{t("importedFromYouTube")}</p>
@@ -3480,7 +3571,7 @@ export function VocalMapApp({
                       {draft.channelTitle ?? ""} · {formatDuration(draft.durationMs)}
                     </p>
                     {draft.youtubeVideoId ? (
-                      <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700" href={`https://www.youtube.com/watch?v=${encodeURIComponent(draft.youtubeVideoId)}`} target="_blank" rel="noreferrer">
+                      <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-primary" href={`https://www.youtube.com/watch?v=${encodeURIComponent(draft.youtubeVideoId)}`} target="_blank" rel="noreferrer">
                         {common("openOnYouTube")} <ExternalLink size={13} />
                       </a>
                     ) : null}
@@ -3490,8 +3581,8 @@ export function VocalMapApp({
 
               <label className="grid gap-2 text-sm font-semibold text-stone-700">
                 {t("lyricsLabel")}
-                <textarea
-                  className="min-h-[34dvh] w-full resize-y rounded-xl border border-stone-200 bg-white p-4 text-base leading-7 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                <Textarea
+                  className="min-h-[34dvh] resize-y rounded-3xl bg-input/30 p-4 text-base leading-7"
                   value={draft.lyricsText}
                   onChange={(event) => setDraft((current) => ({ ...current, lyricsText: event.target.value }))}
                   placeholder={t("lyricsPlaceholder")}
@@ -3502,7 +3593,7 @@ export function VocalMapApp({
             <section className="mt-4 grid gap-3 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4">
               <div>
                 <p className="flex items-center gap-2 text-xs font-bold uppercase text-stone-500">
-                  <span className={`grid size-5 place-items-center rounded-full text-[11px] leading-none text-white ${songDraftIsComplete ? "bg-emerald-600" : "bg-stone-300"}`}>3</span>
+                  <span className={`grid size-5 place-items-center rounded-full text-[11px] leading-none text-primary-foreground ${songDraftIsComplete ? "bg-primary" : "bg-stone-300"}`}>3</span>
                   {t("songFlowAudioTitle")}
                 </p>
                 <p className="mt-1 text-sm leading-5 text-stone-600">{t("songFlowAudioBody")}</p>
@@ -3531,7 +3622,7 @@ export function VocalMapApp({
                   </p>
                 )}
               </div>
-              {pendingSongAudioFile ? <p className="text-sm font-medium text-emerald-700">{t("selectedAudioFile", { name: pendingSongAudioFile.name })}</p> : null}
+              {pendingSongAudioFile ? <p className="text-sm font-medium text-primary">{t("selectedAudioFile", { name: pendingSongAudioFile.name })}</p> : null}
             </section>
 
             <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -3582,8 +3673,8 @@ export function VocalMapApp({
           </article>
         ) : (
           <div className="mx-auto grid h-full min-h-[24rem] max-w-lg place-items-center content-center">
-            <div className="grid w-full justify-items-center gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-8 text-center shadow-[0_28px_80px_rgba(0,104,83,0.18)] backdrop-blur-md">
-              <Image className="h-auto w-40" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={196} height={93} priority />
+            <div className="grid w-full justify-items-center gap-4 rounded-[1.5rem] border border-white/70 bg-white/[0.92] p-8 text-center shadow-[0_28px_80px_var(--vm-accent-shadow-soft)] backdrop-blur-md">
+              <Image className="h-auto w-40" src="/images/vocalmapp-logo-green.svg" alt={common("appName")} width={286} height={40} priority unoptimized />
               <h1 className="text-2xl font-bold text-stone-950 sm:text-3xl">{t("emptyWorkspaceTitle")}</h1>
               <p className="max-w-md text-sm leading-6 text-stone-600 sm:text-base sm:leading-7">{t("emptyWorkspaceBody")}</p>
               <button className={`${primaryButtonClass} min-w-36`} type="button" onClick={openManualDraft}>
@@ -3594,48 +3685,6 @@ export function VocalMapApp({
           </div>
         )}
       </section>
-
-      {activeSong && !editingSongId ? (
-        <SongPlayerDock
-          song={activeSong}
-          provider={activeAudioProvider}
-          selectedAudioId={selectedSongAudioId}
-          onProviderChange={setPreferredAudioProvider}
-          onSelectedAudioChange={setSelectedSongAudioId}
-          onUpload={(song, file, label) => void uploadSongAudio(song, file, label)}
-          onRemove={(song, audioReference) => void removeSongAudio(song, audioReference)}
-          seekRequest={playerSeekRequest}
-          onTimeUpdate={setPlayerTimeMs}
-          onPlayerError={handleYouTubePlayerError}
-          supabase={supabase}
-          labels={{
-            nowPlaying: t("audioDockNowPlaying"),
-            youtube: common("youtube"),
-            file: t("audioDockFile"),
-            fileSelect: t("audioDockFileSelect"),
-            noFile: t("audioDockNoFile"),
-            deleteAudio: t("deleteSongAudio"),
-            addFile: t("addAudioFile"),
-            audioNameTitle: t("audioNameTitle"),
-            audioNameLabel: t("audioNameLabel"),
-            audioNamePlaceholder: t("audioNamePlaceholder"),
-            audioNameInstrumental: t("audioNameInstrumental"),
-            audioNameOriginal: t("audioNameOriginal"),
-            audioNameCover: t("audioNameCover"),
-            audioNameRequired: t("audioNameRequired"),
-            audioUploadDialogBody: t("audioUploadDialogBody"),
-            chooseAudioFile: t("chooseAudioFile"),
-            changeAudioFile: t("changeAudioFile"),
-            noAudioFile: t("noAudioFile"),
-            cancel: common("cancel"),
-            close: common("close"),
-            youtubeTitle: t("youtubePlayerTitle", { title: activeSong.title }),
-            audioNotice: t("youtubeAudioNotice"),
-            expand: t("expandPlayer"),
-            collapse: t("collapsePlayer")
-          }}
-        />
-      ) : null}
 
       {isSettingsOpen ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-stone-950/30 px-4 py-6 backdrop-blur-sm">
@@ -3665,13 +3714,13 @@ export function VocalMapApp({
               <nav className="flex overflow-x-auto border-b border-stone-200 bg-white md:block md:overflow-visible md:border-b-0 md:border-r">
                 <button
                   className={`flex min-w-48 items-center justify-between gap-3 border-r border-stone-200 px-3 py-3 text-left transition md:w-full md:border-b md:border-r-0 ${
-                    activeSettingsPanel === "markers" ? "bg-emerald-50/50" : "bg-white hover:bg-stone-50"
+                    activeSettingsPanel === "markers" ? "bg-primary/5" : "bg-white hover:bg-stone-50"
                   }`}
                   type="button"
                   onClick={() => setActiveSettingsPanel("markers")}
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="grid size-7 flex-none place-items-center rounded-lg bg-emerald-50 text-emerald-700">
+                    <span className="grid size-7 flex-none place-items-center rounded-lg bg-primary/5 text-primary">
                       <Sparkles size={14} />
                     </span>
                     <span className="min-w-0">
@@ -3682,7 +3731,7 @@ export function VocalMapApp({
                 </button>
                 <button
                   className={`flex min-w-48 items-center justify-between gap-3 border-r border-stone-200 px-3 py-3 text-left transition md:w-full md:border-b md:border-r-0 ${
-                    activeSettingsPanel === "lyrics" ? "bg-emerald-50/50" : "bg-white hover:bg-stone-50"
+                    activeSettingsPanel === "lyrics" ? "bg-primary/5" : "bg-white hover:bg-stone-50"
                   }`}
                   type="button"
                   onClick={() => {
@@ -3713,7 +3762,7 @@ export function VocalMapApp({
                       <p className="mt-1 text-xs leading-5 text-stone-500">{t("markerPanelHint")}</p>
                     </div>
                     <button
-                      className="inline-flex h-7 flex-none items-center justify-center gap-1 rounded-full bg-emerald-600 px-2.5 text-[0.6875rem] font-semibold text-white transition hover:bg-emerald-700"
+                      className="inline-flex h-7 flex-none items-center justify-center gap-1 rounded-full bg-primary px-2.5 text-[0.6875rem] font-semibold text-primary-foreground transition hover:bg-primary/90"
                       type="button"
                       onClick={openMarkerCreate}
                     >
@@ -3729,7 +3778,7 @@ export function VocalMapApp({
                       return (
                         <button
                           className={`inline-flex min-h-6 max-w-full items-center gap-1 rounded-full border px-2 text-[0.6875rem] font-medium leading-none transition ${
-                            isSelected ? "ring-1 ring-emerald-300 ring-offset-1 ring-offset-white" : ""
+                            isSelected ? "ring-1 ring-primary/30 ring-offset-1 ring-offset-white" : ""
                           }`}
                           type="button"
                           key={marker.id}
@@ -3780,7 +3829,7 @@ export function VocalMapApp({
                   ) : null}
 
                   {hiddenSystemMarkerIds.size > 0 || Object.keys(systemMarkerOverrides).length > 0 ? (
-                    <button className="justify-self-start p-4 text-xs font-semibold text-emerald-700 transition hover:text-emerald-900" type="button" onClick={resetSystemMarkers}>
+                    <button className="justify-self-start p-4 text-xs font-semibold text-primary transition hover:text-primary/80" type="button" onClick={resetSystemMarkers}>
                       {t("markerResetDefaults")}
                     </button>
                   ) : null}
@@ -3886,7 +3935,7 @@ export function VocalMapApp({
                       <label className="grid gap-2 text-xs font-semibold uppercase text-stone-500">
                         {t("songTextSizeLabel")}
                         <input
-                          className="accent-emerald-600"
+                          className="accent-primary"
                           type="range"
                           min={MIN_LYRIC_TEXT_SIZE}
                           max={MAX_LYRIC_TEXT_SIZE}
@@ -3903,7 +3952,7 @@ export function VocalMapApp({
                       <label className="grid gap-2 text-xs font-semibold uppercase text-stone-500">
                         {t("songTextLineSpacingLabel")}
                         <input
-                          className="accent-emerald-600"
+                          className="accent-primary"
                           type="range"
                           min={MIN_LYRIC_LINE_SPACING}
                           max={MAX_LYRIC_LINE_SPACING}
@@ -3920,7 +3969,7 @@ export function VocalMapApp({
                       <label className="grid gap-2 text-xs font-semibold uppercase text-stone-500">
                         {t("songTextWordSpacingLabel")}
                         <input
-                          className="accent-emerald-600"
+                          className="accent-primary"
                           type="range"
                           min={MIN_LYRIC_WORD_SPACING}
                           max={MAX_LYRIC_WORD_SPACING}
@@ -3941,7 +3990,7 @@ export function VocalMapApp({
                       {[12, 16, 18].map((size) => (
                         <button
                           className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
-                            lyricTextSize === size ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                            lyricTextSize === size ? "border-primary/30 bg-primary/5 text-primary" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
                           }`}
                           type="button"
                           key={size}
@@ -3959,7 +4008,7 @@ export function VocalMapApp({
                         {[2, 4, 8].map((spacing) => (
                           <button
                             className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
-                              lyricLineSpacing === spacing ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                              lyricLineSpacing === spacing ? "border-primary/30 bg-primary/5 text-primary" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
                             }`}
                             type="button"
                             key={spacing}
@@ -3977,7 +4026,7 @@ export function VocalMapApp({
                         {[2, 4, 8].map((spacing) => (
                           <button
                             className={`inline-flex min-h-8 items-center justify-center rounded-full border px-3 text-xs font-medium transition ${
-                              lyricWordSpacing === spacing ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                              lyricWordSpacing === spacing ? "border-primary/30 bg-primary/5 text-primary" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
                             }`}
                             type="button"
                             key={spacing}
@@ -4011,7 +4060,7 @@ export function VocalMapApp({
 
       {selection && selectedData && !isSelectingWords ? (
         <div
-          className={`marker-composer ${activeAudioProvider ? "with-audio" : ""}`}
+          className="marker-composer"
           data-marker-popover="true"
           style={popoverStyle}
           role="dialog"
@@ -4113,8 +4162,8 @@ export function VocalMapApp({
 
           {isNoteEditorOpen ? (
             <form className="mt-3 grid gap-2 border-t border-stone-200 pt-3" onSubmit={(event) => void saveTextNote(event)}>
-              <textarea
-                className="min-h-24 w-full resize-y rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm leading-5 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              <Textarea
+                className="min-h-24 resize-y rounded-2xl text-sm leading-5"
                 value={noteDraft}
                 onChange={(event) => setNoteDraft(event.target.value)}
                 placeholder={t("notePlaceholder")}
@@ -4141,9 +4190,9 @@ export function VocalMapApp({
       ) : null}
 
       {isProfileGateReady && isProfileModalOpen ? (
-        <div className="fixed inset-0 z-40 grid place-items-center bg-emerald-950/35 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-40 grid place-items-center bg-primary/20 px-4 backdrop-blur-sm">
           <form
-            className="relative grid w-full max-w-md gap-5 rounded-[1.5rem] border border-white/80 bg-white p-6 text-center shadow-[0_28px_90px_rgba(0,80,68,0.28)]"
+            className="relative grid w-full max-w-md gap-5 rounded-[1.5rem] border border-white/80 bg-white p-6 text-center shadow-[0_28px_90px_var(--vm-accent-shadow-strong)]"
             onSubmit={(event) => void saveProfile(event)}
           >
             {profile.onboardingCompleted ? (
@@ -4152,7 +4201,7 @@ export function VocalMapApp({
               </button>
             ) : null}
 
-            <div className="mx-auto grid size-12 place-items-center rounded-xl bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.24)]">
+            <div className="mx-auto grid size-12 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[0_12px_26px_var(--vm-accent-shadow-strong)]">
               <UserRound size={22} />
             </div>
             <div>
@@ -4174,8 +4223,8 @@ export function VocalMapApp({
               </label>
               <label className="grid gap-2 text-sm font-semibold text-stone-700">
                 {t("profileGoal")}
-                <textarea
-                  className="min-h-24 w-full resize-none rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm leading-6 text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                <Textarea
+                  className="min-h-24 rounded-3xl text-sm leading-6"
                   value={profileDraft.vocalGoal}
                   onChange={(event) => setProfileDraft((current) => ({ ...current, vocalGoal: event.target.value }))}
                   placeholder={t("profileGoalPlaceholder")}
@@ -4196,7 +4245,7 @@ export function VocalMapApp({
 
       {statusMessage ? (
         <button
-          className={`status-toast ${activeAudioProvider ? "with-audio" : ""}`}
+          className="status-toast"
           type="button"
           onClick={() => setStatusMessage("")}
           role="status"
